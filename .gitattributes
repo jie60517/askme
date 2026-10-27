@@ -13,3 +13,10 @@
 # deploy/workdirs/RULES-web-context.md 會被 COPY 進 Linux 的 image 當成每一題都載入的
 # 規則檔,各專案的 CLAUDE.md 也是模型每一題都讀的檔 —— 不要讓 Windows 的行尾跟著進去。
 *.md text eol=lf
+
+# Windows 的一鍵腳本一律 CRLF。
+#
+# .cmd 是 cmd.exe 讀的批次檔,LF 行尾在某些情況(標籤、goto)會讀錯行;.ps1 給
+# Windows PowerShell 5.1 跑,一起固定成 CRLF。(.ps1 另外要存成 UTF-8 with BOM,見檔頭。)
+*.cmd text eol=crlf
+*.ps1 text eol=crlf

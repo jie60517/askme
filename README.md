@@ -10,30 +10,83 @@
 **需要**:Python 3.11+、Node 20.19+ 或 22.12+(vite 的要求)、Claude Code CLI 裝好並登入過一次(終端機打 `claude` 能問答)。
 沒有 `claude` 網頁照樣開得起來,只是問答會回「無法啟動 claude CLI」。
 
-**開發版:直接在本機跑**(後端、前端各開一個視窗,都從 repo 根目錄起算)
+**開發版(Windows):安裝 → 放專案 → 啟動,三步。** 在 PowerShell 裡,repo 根目錄底下打:
 
-```bash
-# 後端 —— http://localhost:8123
+**1. 安裝**(只要一次;重跑也沒關係,已經有的 `.venv`、`backend\.env` 不會被蓋掉)
+
+```powershell
+.\setup.cmd
+```
+
+它會檢查 Python / Node / claude 的版本,建後端的 `.venv` 並裝套件、從 `.env.example` 複製出
+`backend\.env`、裝前端套件。最後印出「安裝完成」就好了。npm 若顯示「N vulnerabilities」是套件的
+已知漏洞提醒,不影響啟動;**不要跑 `npm audit fix`**(它會改掉 `package-lock.json`)。
+
+**2. 把專案放進 `workspace\`**:`workspace` 底下**第一層的每一個資料夾就是一個專案**,
+資料夾名就是網頁上的專案名稱。整個專案資料夾(含程式碼)複製進去,裡面的結構不用改。
+例如正式區、測試區各放一個:
+
+```
+askme\workspace\
+├─ example\     ← repo 附的範例專案(不要的話見下面「不要範例專案」)
+├─ topprod\     ← 正式區
+│   ├─ CLAUDE.md          這個專案的規則:這是什麼專案、怎麼回答(範本 workspace\example\CLAUDE.md)
+│   ├─ .claude\skills\    專案專用的 skill(選配)
+│   └─ tiptop\aap\4gl\…   程式碼本身
+└─ toptest\     ← 測試區,例:askme\workspace\toptest\tiptop\aap\4gl
+```
+
+⚠️ 資料夾裡要有**程式碼本身**,只放 `CLAUDE.md` 的話問什麼都讀不到東西,而畫面上不會提示。
+啟動之後再放也可以:重新整理網頁就出現,不用重啟。
+
+**3. 啟動**(之後每次都只要這一行)
+
+```powershell
+.\start.cmd
+```
+
+同一個視窗裡起後端與前端,前端好了會自動開瀏覽器到 <http://localhost:5173>。看到
+「好了。打開 http://localhost:5173 …」那一行就是起來了,**視窗會停在那裡不動,這是正常的,不要關**;
+要停就按 Ctrl+C。8123 是後端的 API,**不是網頁**,在瀏覽器開它只會看到 404。
+埠被佔了就換:`.\start.cmd -BackendPort 8124 -FrontendPort 5174`。
+
+用 **tiptop / tiptop** 登入(`backend\.env` 的 `ADMIN_USERNAME` / `ADMIN_PASSWORD`,給別人用之前改掉)。
+專案有兩個以上時,輸入框旁會有專案選單。管理員到「帳號管理」建同仁的帳號。
+
+**不要範例專案**:`workspace\example` 是 repo 附的範例(不是你的專案)。只刪資料夾不夠 ——
+它也登記在 `backend\knowledge_bases.json`,刪了資料夾選單上還是有「範例專案」,新對話也還是預設它。
+要整個拿掉:刪 `workspace\example`;`knowledge_bases.json` 的 `"default"` 改成你的資料夾名、
+`"bases"` 改成 `[]`;重啟(Ctrl+C 再 `.\start.cmd`)。只想讓新對話預設你的專案,改 `"default"` 就好。
+
+<details>
+<summary>手動安裝與啟動(不用腳本、或在 Linux / macOS)</summary>
+
+後端、前端各開一個終端機,都從 repo 根目錄起算。Linux / macOS 把 `.venv\Scripts` 換成 `.venv/bin`、`Copy-Item` 換成 `cp`。
+
+```powershell
+# 後端(API,http://127.0.0.1:8123,不是網頁)
 cd backend
 python -m venv .venv
-.venv/Scripts/pip install -r requirements-dev.txt   # Linux / macOS 把 Scripts 換成 bin
-cp .env.example .env
-.venv/Scripts/python -m uvicorn app.main:app --port 8123
-#   Windows 不要加 --reload(event loop 會 NotImplementedError,問答跑不起來)
+.venv\Scripts\pip install -r requirements-dev.txt
+Copy-Item .env.example .env
+.venv\Scripts\python -m uvicorn app.main:app --port 8123
+```
 
-# 前端 —— http://localhost:5173,/api 由 vite 轉到 8123
+```powershell
+# 前端(網頁,http://localhost:5173;/api 由 vite 轉到 8123)
 cd frontend
 npm install
 npm run dev
 ```
 
-開 <http://localhost:5173>,用 **tiptop / tiptop** 登入(`backend/.env` 的 `ADMIN_USERNAME` /
-`ADMIN_PASSWORD`,給別人用之前改掉)。管理員到「帳號管理」建同仁的帳號。
+後端印出 `Uvicorn running on http://127.0.0.1:8123`、前端印出 `Local: http://localhost:5173/` 就是起來了,
+兩個視窗都會停住不動,不要關。Windows 上後端**不要加 `--reload`**(event loop 會 NotImplementedError,問答跑不起來)。
 
-**放自己的專案**:把專案資料夾放進 `workspace/`,重新整理網頁,輸入框旁的專案選單就會出現它(不用重啟)。
+</details>
 
-- 專案的規則(這是什麼專案、怎麼回答)寫在那個資料夾的 `CLAUDE.md`
-- 專案專用的 skill 放在那個資料夾的 `.claude/skills/`
+**讓 AI 帶第一次安裝**:clone 下來之後在 repo 根目錄開 `claude`,說「照 INSTALL.md 帶我安裝」。
+[`INSTALL.md`](INSTALL.md) 寫了它該怎麼帶(安裝 → 放專案 → 範例留不留 → 啟動指令)。
+(不放成根目錄的 `CLAUDE.md`:`workspace\` 的專案在 repo 底下,網頁問答時 claude 會往上層讀到它。)
 
 **資料庫**:預設 SQLite(`backend/data/app.db`),不用另外裝。多人用改 PostgreSQL:
 把 `backend/.env` 的 `DATABASE_URL` 換成 `postgresql+psycopg://帳號:密碼@主機:5432/資料庫名` 這一行
@@ -127,6 +180,7 @@ deploy/              docker/(部署版,唯一的部署方式)、env.server.examp
                      nginx 範本(選配的 https 前端)、workdirs/(身分檔範本與網頁情境規則)、
                      security_test.py(對本機或已部署的站跑安全檢查)
 workspace/           放你自己的專案(範例:workspace/example/,見「怎麼用」)
+scripts/             Windows 開發版的一鍵安裝 / 啟動(根目錄的 setup.cmd、start.cmd 叫的就是這兩支)
 pet-companion-kit/   小夥伴元件的 SPEC.md、README 與 examples/(程式碼本體在 frontend/src/pet)
 ```
 
