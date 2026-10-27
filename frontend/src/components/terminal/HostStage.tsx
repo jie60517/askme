@@ -15,7 +15,7 @@
  * - 一區:`Divider` + `Heading level 2`(「主機」)+ `Grid`(範本的 LibrarySection;範本 minWidth 320,這裡是 `CARD_MIN_PX`,理由在那個常數)。
  * - 每一張:範本的 LibraryCard —— 上面 16:9 縮圖、底下 `Section padding={4}` + `Heading level 3`;
  *   整張可點照 `ClickableCardElevated` 用 `elevation="med"`。範本那行 secondary 說明不放。
- * - 縮圖是 logo(放法見 README「SSH 終端機」一節);沒有圖就顯示名稱的首字。
+ * - 縮圖是 logo(放法見 docs/architecture.md「SSH 終端機」一節);沒有圖就顯示名稱的首字。
  *   **logo 照原圖白底,不鋪顏色**(不加品牌色的淡底;灰底頁面、卡片 `elevation="med"` 浮著、區塊上方有 Divider)。
  * - 狀態那行英文(Connecting to… / Connected to… / Idle)**只給報讀程式**,畫面上只有 Spinner / 綠點。
  */

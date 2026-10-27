@@ -17,7 +17,7 @@
     "  known_hosts  主機金鑰檔。留空就共用 SSH_TERMINAL_KNOWN_HOSTS",
     "  start_dir    檔案欄一開始停在哪。~ = 家目錄",
     "",
-    "卡片上的 logo 不在這裡設定,放法見 README「SSH 終端機」一節。",
+    "卡片上的 logo 不在這裡設定,放法見 docs/architecture.md「SSH 終端機」一節。",
     "",
     "⚠️ 跳板那一台的 known_hosts 是**服務這台**對它做 ssh-keyscan 的結果;",
     "   經跳板連過去的那一台,keyscan 要在**跳板上**做,再把那一行搬進這裡指定的檔案。"

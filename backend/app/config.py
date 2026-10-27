@@ -796,7 +796,7 @@ MFA_CHALLENGE_TTL_SEC = int(os.environ.get("MFA_CHALLENGE_TTL_SEC", "300"))
 # 最後才把這個設成 1 並重啟服務。
 #
 # ⚠️ 管理員自己也要先綁。他被這條擋住的話沒有任何網頁上的救法,
-# 只能上主機刪 user_mfa 那一列(指令見 README)。
+# 只能上主機刪 user_mfa 那一列(指令見 docs/security.md〈有人被鎖在門外的時候〉)。
 # 預設關、只有明確填了肯定字才開(`_env_opt_in`):誤開的後果是所有人(含管理員)
 # 在部署的那一瞬間全部登不進來。
 MFA_REQUIRED = _env_opt_in("MFA_REQUIRED")

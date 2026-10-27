@@ -168,7 +168,7 @@ class QAStep(Base):
     input_tokens = Column(Integer, nullable=True)
     #: 命中快取的輸入。它很便宜,而且越大代表快取越有效 —— 這個數字沒有變大,
     #: 就代表提示的固定前綴有東西在逐題漂動
-    #: (見 README 的「錢花在哪:prompt cache 每一題都整份失效」)。
+    #: (見 docs/architecture.md〈prompt cache:不能讓快取前綴每題都變〉)。
     cache_read_tokens = Column(Integer, nullable=True)
     #: 寫進快取的輸入(第一次要付較貴的價錢,之後才划算)
     cache_creation_tokens = Column(Integer, nullable=True)

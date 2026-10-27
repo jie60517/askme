@@ -1,5 +1,5 @@
 /**
- * 進行中的問答(README「一題問答是怎麼跑的」)。
+ * 進行中的問答(docs/architecture.md「一題問答是怎麼跑的」)。
  *
  * 回答**不是掛在 HTTP 連線上跑的**:後端一收到 /api/ask 就寫一筆 status="running"
  * 的紀錄、把 claude 丟到背景 task,HTTP 回應只是「在看」那條事件流。
