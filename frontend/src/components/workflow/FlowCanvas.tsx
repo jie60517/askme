@@ -1434,12 +1434,11 @@ const NodeCard = memo(function NodeCard({
   const unset = isUnset(node, catalog);
   const badScript = scriptProblem(node, catalog);
   // 同步跑的時候還不知道總數(progress 是 null,rsync 還在列清單)就畫不定長度的進度條,不畫一條會亂跳的百分比。
-  // 只有同步:備份沒有進度可報,跑的時候不畫條,不要讓它整段都在跑動畫
   const isIndeterminate = node.type === 'sync' && progress == null && state === 'running';
   // 清單收齊前就失敗:沒有百分比,整條紅 —— 不然條子直接消失,看不出是失敗
   const isFailedEarly = node.type === 'sync' && progress == null && state === 'fail';
   const showProgress =
-    isIndeterminate || isFailedEarly || ((node.type === 'sync' || node.type === 'backup') && progress != null && state != null && state !== 'skip');
+    isIndeterminate || isFailedEarly || (node.type === 'sync' && progress != null && state != null && state !== 'skip');
   const set = (key: string, value: NodeCfg[string]) => onCfg(node.id, {...cfg, [key]: value});
 
   return (

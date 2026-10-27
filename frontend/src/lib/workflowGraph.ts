@@ -12,19 +12,14 @@ import type {Catalog, FlowEdge, FlowGraph, FlowNode, NodeCfg, NodeType, Schedule
 
 /** 拼圖盒的分組與順序。 */
 export const PALETTE: Array<{group: string; types: NodeType[]}> = [
-  // 「連線客戶」就是 VPN + 主機一次連好,所以拼圖盒不另外給「連線客戶主機」;流程裡已經有的照顯示、照跑
+  // 「連線客戶」就是 VPN + 主機一次連好
   {group: '連線', types: ['vpn', 'vpnoff']},
-  // 「備份資料庫」不放進拼圖盒;流程裡已經有的那塊照跑、照顯示
   {group: '程式', types: ['sync', 'script']},
-  // 「條件判斷」不放進拼圖盒;流程裡已經有的那塊照跑、照顯示
   {group: '流程控制', types: ['wait']},
   {group: '通知', types: ['notify']},
 ];
 
-/**
- * 拼圖盒裡有的種類。不在拼圖盒的(備份資料庫、條件判斷、連線客戶主機)流程裡已經有的照跑、照顯示,
- * 但**不能再複製出新的一塊**(右鍵的複製鈕不畫)—— 不在拼圖盒就是不要再多出來
- */
+/** 拼圖盒裡有的種類。不在拼圖盒的(只有起點)不能複製出新的一塊(右鍵的複製鈕不畫) */
 export const PALETTE_TYPES: ReadonlySet<NodeType> = new Set(PALETTE.flatMap((g) => g.types));
 
 /** 新拖出來那一塊的設定:照後端給的欄位預設值與逾時。 */
@@ -162,20 +157,17 @@ export function curveMidNormal(a: {x: number; y: number}, b: {x: number; y: numb
 export const INLINE_FIELDS: Record<NodeType, string[]> = {
   start: [],
   vpn: ['client'],
-  ssh: [],
   vpnoff: [],
   sync: ['src', 'dst'],
   script: ['script'],
-  backup: ['db'],
-  cond: ['cond'],
   wait: ['sec'],
   // 通知內容不用選:一律附完整的失敗原因與輸出
   notify: ['who'],
 };
 
 /**
- * 跑到這一塊的時候客戶主機是不是連著的:往回找得到「連線客戶」(或「連線客戶主機」)的**成功**出口
- * (跟後端 `connected_to_client_host` 同一份)。碰到「中斷連線」、或接在它們的失敗出口就不算。
+ * 跑到這一塊的時候客戶主機是不是連著的:往回找得到「連線客戶」的**成功**出口
+ * (跟後端 `connected_to_client_host` 同一份)。碰到「中斷連線」、或接在它的失敗出口就不算。
  * 「連線客戶」就是 VPN + 主機一起連,所以它的成功出口也算 —— **但只有那個客戶設定檔裡有主機
  * (`client_keys` 有 `host`)時才算**;沒寫主機的客戶只撥 VPN,後面的腳本照舊在主機跑。
  */
@@ -191,7 +183,7 @@ export function connectedToClientHost(graph: FlowGraph, id: string, catalog: Cat
       const up = byId.get(e.from);
       const t = up?.type;
       const hasHost = t === 'vpn' && !!catalog?.client_keys[String(up?.cfg?.client ?? '')]?.includes('host');
-      if (t === 'ssh' || hasHost) {
+      if (hasHost) {
         if (e.out === 0) return true;
         continue;
       }

@@ -2,10 +2,8 @@
 
 `backend/knowledge_bases.json` 的每一筆都有一個 `workdir`:claude 子行程就在那個目錄裡起來(cwd),
 所以那裡的 `CLAUDE.md`、`.claude/skills/` 會被載入,session 也存進對應的 `~/.claude/projects/` 格子。
-這個目錄放的是那些檔案的**範本與正本** —— 複製到各專案的 workdir 之後再依專案改。
+各專案的 `CLAUDE.md` 範本是 `workspace/example/CLAUDE.md`;這個目錄只放:
 
-- `example/CLAUDE.md`:一份中性的範例,說明一個 workdir 的身分檔該寫什麼
-  (我是哪個專案、只准讀哪些路徑、文件在哪、最後用 `@` 引入網頁情境規則)。
 - `RULES-web-context.md`:「網頁情境規則」的**正本** —— 模型被網頁服務以 headless 模式叫起來時,
   跟人坐在終端機前不一樣的那幾條(使用者看不到終端機、不能互動確認、只能寫 outputs、
   引用要附檔案:行號、回答格式)。**每個專案的 workdir 放一份副本**,`CLAUDE.md` 在檔尾用

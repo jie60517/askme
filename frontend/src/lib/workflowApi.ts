@@ -10,12 +10,9 @@ import {api} from './api';
 export type NodeType =
   | 'start'
   | 'vpn'
-  | 'ssh'
   | 'vpnoff'
   | 'sync'
   | 'script'
-  | 'backup'
-  | 'cond'
   | 'wait'
   | 'notify';
 
@@ -100,7 +97,7 @@ export type NodeSpec = {
   inherits_client: boolean;
   /** 這一步要用客戶設定裡的哪一個鍵(`client_keys` 裡沒有就是設定檔少了指令) */
   client_key: string;
-  /** 只有上游連著客戶主機時才沿用客戶(「執行腳本」接在「連線客戶」或「連線客戶主機」成功出口後面才在客戶主機跑,見 `connectedToClientHost`);null = 一律沿用 */
+  /** 只有上游連著客戶主機時才沿用客戶(「執行腳本」接在「連線客戶」成功出口後面才在客戶主機跑,見 `connectedToClientHost`);null = 一律沿用 */
   client_after: NodeType | null;
 };
 

@@ -53,7 +53,7 @@ docker compose exec -it askme claude
 |---|---|
 | 看 log | `docker compose logs -f askme` |
 | 改了 `askme.env` / `knowledge_bases.json` | `docker compose up -d --force-recreate askme` |
-| 更新程式 | 拉新的程式碼後 `docker build -f deploy/docker/Dockerfile -t askme:<新版號> ../..`,`.env` 的 `ASKME_TAG` 改成新版號,`docker compose up -d` |
+| 更新程式 | 拉新的程式碼後(在 `deploy/docker` 裡)`docker build -f Dockerfile -t askme:<新版號> ../..`,`.env` 的 `ASKME_TAG` 改成新版號,`docker compose up -d` |
 | 退回上一版 | `.env` 的 `ASKME_TAG` 改回舊版號,`docker compose up -d` |
 | 備份資料庫 | `docker compose exec postgres pg_dump -U askme askme > askme-$(date +%Y%m%d).sql` |
 | 停掉 | `docker compose down`(資料在 volume 裡,不會不見;**不要加 `-v`**,那會連資料一起刪) |

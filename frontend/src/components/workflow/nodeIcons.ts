@@ -1,10 +1,7 @@
 import {
   Bell,
-  Building2,
   Clock,
-  Database,
   FileCode,
-  GitBranch,
   RefreshCw,
   Server,
   ShieldCheck,
@@ -18,12 +15,9 @@ import type {NodeType} from '../../lib/workflowApi';
 export const NODE_ICONS: Record<NodeType, LucideIcon> = {
   start: Server,
   vpn: ShieldCheck,
-  ssh: Building2,
   vpnoff: Unplug,
   sync: RefreshCw,
   script: FileCode,
-  backup: Database,
-  cond: GitBranch,
   wait: Clock,
   notify: Bell,
 };

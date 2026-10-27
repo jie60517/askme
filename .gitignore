@@ -26,6 +26,11 @@ agent-knowledge/outputs/
 # 備份檔
 *.bak
 
+# ── 你自己的專案 ────────────────────────────────────────
+# workspace/ 底下是各人放的專案(原始碼、CLAUDE.md、skill),不進這個 repo;只有範例留著。
+workspace/*
+!workspace/example/
+
 # ── 打包 / 建置產物 ─────────────────────────────────────
 *.tar.gz
 # 打包檔的備份(askme.tar.gz.bak-…)

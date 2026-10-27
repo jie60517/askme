@@ -123,8 +123,8 @@ describe('客戶沿用上游的 VPN(跟後端 client_of 同一套規則)', () =>
     // VPN 自己算「還沒設定」,下游不另外算
     expect(clientIssue(unset, unset.nodes[2], catalog)).toBeNull();
   });
-  it('腳本:認不得的副檔名擋執行;接在「連線客戶主機」後面才沿用客戶(跟後端 needs_client 同一套)', () => {
-    const cat = {...catalog, nodes: {...catalog.nodes, script: {...catalog.nodes.sync, label: '執行腳本', client_key: 'host', client_after: 'ssh', required: ['script']}}} as Catalog;
+  it('腳本:認不得的副檔名擋執行;接在「連線客戶」成功出口後面才沿用客戶(跟後端 needs_client 同一套)', () => {
+    const cat = {...catalog, nodes: {...catalog.nodes, script: {...catalog.nodes.sync, label: '執行腳本', client_key: 'host', client_after: 'vpn', required: ['script']}}} as Catalog;
     const g = graph();
     g.nodes.push({id: 'sc', type: 'script', x: 5, y: 0, cfg: {script: '/srv/a.txt'}});
     g.edges.push({from: 'n2', out: 0, to: 'sc'});
@@ -150,13 +150,6 @@ describe('客戶沿用上游的 VPN(跟後端 client_of 同一套規則)', () =>
     noHost.nodes.push({id: 'sc', type: 'script', x: 5, y: 0, cfg: {script: '/srv/A.PY'}});
     noHost.edges.push({from: 'n1', out: 0, to: 'sc'});
     expect(needsClient(noHost, noHost.nodes[3], cat)).toBe(false);
-    // 「連線客戶主機」(不在拼圖盒,流程裡已經有的)照樣算
-    g.nodes.push({id: 'ssh', type: 'ssh', x: 4, y: 1});
-    g.edges = g.edges.filter((e) => e.to !== 'sc').concat({from: 'n2', out: 0, to: 'ssh'}, {from: 'ssh', out: 0, to: 'sc'});
-    expect(needsClient(g, g.nodes[3], cat)).toBe(true);
-    // 接在「連線客戶主機」的失敗出口:沒連上,回主機
-    g.edges = g.edges.map((e) => (e.from === 'ssh' ? {...e, out: 1} : e));
-    expect(needsClient(g, g.nodes[3], cat)).toBe(false);
   });
   it('客戶的設定檔少了這一步的指令:按執行之前就擋(跟後端同一句)', () => {
     const wb = graph();

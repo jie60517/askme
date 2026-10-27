@@ -9,7 +9,8 @@
 #   knowledge_bases.json  要回答哪個專案的問題
 #
 # 三個容器:
-#   askme     網站 + claude CLI。訂閱模式的登入存在它的 volume;**API key 不放這裡**(AI 有 Bash)
+#   askme     網站 + claude CLI。訂閱模式的登入存在它的 volume —— 有 Bash 的帳號(管理員、進階帳號)
+#             讀得到它,所以這兩種帳號只給信得過的人。apikey 模式的 key 不放這裡,只在 keyproxy
 #   keyproxy  apikey 模式:把 claude 的請求補上 API key 再轉給 Anthropic(key 只在這裡)
 #   postgres  資料庫,不對外開 port
 

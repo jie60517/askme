@@ -185,11 +185,11 @@ app = FastAPI(
 # ⚠️ 正式環境**根本不需要這一段**:前後端由同一個 uvicorn 端出去,同一個 origin,
 # 瀏覽器不會發 preflight,這個中介層一次都不會生效。
 #
-# ⚠️ **不要寫成 `allow_origins=["*"]`。** 實際可利用性低 —— token 走 Authorization
-# 標頭而不是 cookie,而且沒開 `allow_credentials`,所以別的網站叫瀏覽器打過來時
-# 帶不了身分。但它是一道**擺在那裡等人踩**的設定:哪天有人把 token 改成 cookie、
-# 或加上 `allow_credentials=True`,`*` 當場變成「任何網站都能用使用者的身分
-# 打這個 API」。設定放寬的代價通常不是當下,是下一個改動的人不知道它放寬過。
+# ⚠️ **不要寫成 `allow_origins=["*"]`。** 現在擋得住,靠的是沒開 `allow_credentials`:
+# 一般 API 走 Authorization 標頭,只有下載那幾條也認 session cookie(`auth.SESSION_COOKIE`),
+# 而沒開 credentials 時,別的網站叫瀏覽器跨站打過來不會帶那個 cookie。
+# 但它是一道**擺在那裡等人踩**的設定:哪天有人加上 `allow_credentials=True`,
+# `*` 當場變成「任何網站都能用使用者的身分打這個 API」。設定放寬的代價通常不是當下,是下一個改動的人不知道它放寬過。
 #
 # 要在別的機器上開發就設 `CORS_ORIGINS=http://192.168.x.x:5173`(逗號分隔)。
 if config.CORS_ORIGINS:

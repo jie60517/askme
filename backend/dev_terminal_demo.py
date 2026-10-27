@@ -172,7 +172,7 @@ async def shell(process: asyncssh.SSHServerProcess) -> None:
         if isinstance(command, bytes):
             command = command.decode("utf-8", "replace")
         if "demo-" in command or (command.startswith("cd ") and command.endswith("< /dev/null")):
-            # Work Flow 的假指令(WORKFLOW_DEMO_ACTIONS):撥 VPN、同步、備份,以及「執行腳本」
+            # Work Flow 的假指令(WORKFLOW_DEMO_ACTIONS):撥 VPN、同步,以及「執行腳本」
             process.exit(await run_workflow_demo(command, process))
             return
         if command.startswith("ps "):
@@ -291,7 +291,6 @@ WORKFLOW_DEMO_ACTIONS = {
             "sync": "timeout 1800 demo-rsync -az {delete} --info=progress2 --stats customer-a:{src}/ {dst}/",
         },
     },
-    "databases": [{"id": "maindb", "label": "主資料庫", "command": "demo-backup maindb {keep}"}],
 }
 
 (TMP / "workflow_actions.json").write_text(json.dumps(WORKFLOW_DEMO_ACTIONS, ensure_ascii=False), encoding="utf-8")
@@ -357,10 +356,6 @@ async def run_workflow_demo(command: str, process: asyncssh.SSHServerProcess) ->
             out("No such file or directory\n")
             return 2
         out(f"(示範)執行 {command.split(' && ', 1)[1]}\nok\n")
-        return 0
-    if "demo-backup" in command:
-        await asyncio.sleep(2.5)
-        out("exported maindb.dump (1.8 GB)\n")
         return 0
     out(f"demo: 不認得的指令 {command}\n")
     return 127

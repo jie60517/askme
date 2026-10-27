@@ -158,7 +158,7 @@ def _iso(dt: datetime) -> str:
 
 def _summary(head: str) -> str:
     text = _IMAGE_REF.sub(" ", head or "")
-    # 程式碼區塊(```sql、```chart 之類)整段略過:摘要是給人認出這則的,不是一串 SQL / JSON。
+    # 程式碼區塊(```sql、```json 之類)整段略過:摘要是給人認出這則的,不是一串 SQL / JSON。
     # 開頭有、結尾被 600 字截掉的那種也要略過
     text = re.sub(r"```.*?(```|$)", " ", text, flags=re.S)
     lines = []

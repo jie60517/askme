@@ -421,14 +421,23 @@ CLAUDE_EFFORT = os.environ.get("CLAUDE_EFFORT", "")
 def _env_enabled(name: str, default: bool = True) -> bool:
     """讀一個**預設開**的開關:只有明確填了否定字才關掉,留空 = 用預設值。
 
-    ⚠️ **不要拿去讀 TRUST_PROXY_HEADER 那種「預設關」的開關。** 那一種要的是
-    相反的方向 —— 只有明確填了肯定字才開。兩者不能共用同一支:
+    ⚠️ **不要拿去讀 TRUST_PROXY_HEADER 那種「預設關」的開關**,那一種用 `_env_opt_in`
+    —— 只有明確填了肯定字才開。兩者不能共用同一支:
     預設開的東西誤關頂多少了最佳化;預設關的安全開關誤開就是破洞。
     """
     raw = (os.environ.get(name) or "").strip().lower()
     if not raw:
         return default
     return raw not in ("0", "false", "no", "off")
+
+
+def _env_opt_in(name: str) -> bool:
+    """讀一個**預設關**的開關:只有明確填了肯定字才開,留空或打錯字都是關。
+
+    給安全相關、誤開會出事的開關用(MFA_REQUIRED、TRUST_PROXY_HEADER 這類)——
+    方向跟 `_env_enabled` 相反,兩者不能互換。
+    """
+    return (os.environ.get(name) or "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def _env_positive_number_arg(name: str) -> str:
@@ -788,10 +797,9 @@ MFA_CHALLENGE_TTL_SEC = int(os.environ.get("MFA_CHALLENGE_TTL_SEC", "300"))
 #
 # ⚠️ 管理員自己也要先綁。他被這條擋住的話沒有任何網頁上的救法,
 # 只能上主機刪 user_mfa 那一列(指令見 README)。
-# ⚠️ **這裡不能用 `_env_enabled`** —— 那一支是給「預設開」的開關用的。照 TRUST_PROXY_HEADER
-# 那條的寫法:只有明確填了肯定字才開。誤開的後果是所有人(含管理員)
+# 預設關、只有明確填了肯定字才開(`_env_opt_in`):誤開的後果是所有人(含管理員)
 # 在部署的那一瞬間全部登不進來。
-MFA_REQUIRED = os.environ.get("MFA_REQUIRED", "").lower() in ("1", "true", "yes", "on")
+MFA_REQUIRED = _env_opt_in("MFA_REQUIRED")
 
 # **從信任的網路登入就不必輸入六碼。**
 #
@@ -812,15 +820,8 @@ MFA_REQUIRED = os.environ.get("MFA_REQUIRED", "").lower() in ("1", "true", "yes"
 # 但**千萬不要為了「修好它」把那個位址填進 `LOGIN_IP_ALLOWLIST`**:那等於
 # 全世界都免第二關,而且同時把 IP 層的封鎖一起關掉。要修的是代理設定。
 #
-# ⚠️ **不要改用 `_env_enabled()`** —— 那支是給「預設開」的開關用的,規則是
-# 「非否定字即為真」。這一條誤開的後果是一道安全關卡靜靜地消失(沒有任何錯誤訊息),
-# 所以照 MFA_REQUIRED / TRUST_PROXY_HEADER 的寫法:只有明確填了肯定字才開。
-MFA_SKIP_ON_TRUSTED_IP = os.environ.get("MFA_SKIP_ON_TRUSTED_IP", "").lower() in (
-    "1",
-    "true",
-    "yes",
-    "on",
-)
+# 預設關(`_env_opt_in`):這一條誤開的後果是一道安全關卡靜靜地消失(沒有任何錯誤訊息)。
+MFA_SKIP_ON_TRUSTED_IP = _env_opt_in("MFA_SKIP_ON_TRUSTED_IP")
 
 # ADMIN_PASSWORD 的已知佔位字串,一律當成「還沒設」,開機時擋下(見 main.init_database)。
 #
@@ -924,8 +925,7 @@ LOGIN_IP_ALLOWLIST = os.environ.get("LOGIN_IP_ALLOWLIST", "").strip()
 # 所以預設關閉。nginx 後面的代理信任不靠它,靠 uvicorn 的 FORWARDED_ALLOW_IPS(依來源位址
 # 判斷,偽造不了)。這個旗標只留給「uvicorn 前面還有一層
 # 它認不出來的代理」的情況。
-# ⚠️ **不要改用 `_env_enabled()`** —— 那支是給「預設開」的開關用的,理由見它的 docstring。
-TRUST_PROXY_HEADER = os.environ.get("TRUST_PROXY_HEADER", "").lower() in ("1", "true", "yes")
+TRUST_PROXY_HEADER = _env_opt_in("TRUST_PROXY_HEADER")
 
 # ---------------------------------------------------------------- CORS
 #
@@ -985,9 +985,9 @@ def default_user_password_is_usable() -> bool:
 # **這裡設定的**帳號連進主機,畫面上沒有任何表單。
 # 所以這一組就是「連到哪、用誰、拿什麼憑證」的唯一來源。
 #
-# 走真的 SSH 到 sshd,不是在服務裡直接 fork 一個 shell:服務跑在 systemd 沙箱
-# (NoNewPrivileges / ProtectSystem=full / PrivateTmp),直接 fork 出來的 shell 會比
-# 一般 SSH 用戶端少一截;走 SSH 拿到的是跟一般 SSH 用戶端一模一樣的登入 session,sshd 的登入紀錄也照留。
+# 走真的 SSH 到 sshd,不是在服務裡直接 fork 一個 shell:服務自己的身分(容器或服務帳號)
+# fork 出來的 shell 權限與環境都不對;走 SSH 拿到的是跟一般 SSH 用戶端一模一樣的登入 session,
+# sshd 的登入紀錄也照留。
 SSH_TERMINAL_ENABLED = _env_enabled("SSH_TERMINAL_ENABLED", default=True)
 SSH_TERMINAL_HOST = os.environ.get("SSH_TERMINAL_HOST", "127.0.0.1")
 SSH_TERMINAL_PORT = int(os.environ.get("SSH_TERMINAL_PORT", "22"))

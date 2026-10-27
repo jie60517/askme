@@ -7,7 +7,7 @@
 
 ## 怎麼用
 
-**需要**:Python 3.11+、Node 20+、Claude Code CLI 裝好並登入過一次(終端機打 `claude` 能問答)。
+**需要**:Python 3.11+、Node 20.19+ 或 22.12+(vite 的要求)、Claude Code CLI 裝好並登入過一次(終端機打 `claude` 能問答)。
 沒有 `claude` 網頁照樣開得起來,只是問答會回「無法啟動 claude CLI」。
 
 **開發版:直接在本機跑**(後端、前端各開一個視窗,都從 repo 根目錄起算)
@@ -126,7 +126,7 @@ frontend/            React 19 + Astryx 設計系統(StyleX)的聊天介面
 deploy/              docker/(部署版,唯一的部署方式)、env.server.example(全部設定的完整清單)、
                      nginx 範本(選配的 https 前端)、workdirs/(身分檔範本與網頁情境規則)、
                      security_test.py(對本機或已部署的站跑安全檢查)
-workspace/           放你自己的專案(範例:workspace/example/,見「快速開始」)
+workspace/           放你自己的專案(範例:workspace/example/,見「怎麼用」)
 pet-companion-kit/   小夥伴元件的 SPEC.md、README 與 examples/(程式碼本體在 frontend/src/pet)
 ```
 
@@ -1070,7 +1070,7 @@ WebSocket 的第一個訊息要帶 token、`Origin` 要跟 Host 同一台、沒�
    from sqlalchemy import text
    from app.database import engine
    with engine.begin() as c:
-       c.execute(text(\"delete from user_mfa where username='tiptop'\"))"
+       c.execute(text(\"delete from user_mfa where username='<管理員帳號>'\"))"
    ```
 
 3. 用密碼登入 → 在帳號管理頁最上面那張卡片重新產生 QR code 並掃描
