@@ -27,9 +27,10 @@ agent-knowledge/outputs/
 *.bak
 
 # ── 你自己的專案 ────────────────────────────────────────
-# workspace/ 底下是各人放的專案(原始碼、CLAUDE.md、skill),不進這個 repo;只有範例留著。
+# workspace/ 底下是各人放的專案(原始碼、CLAUDE.md、skill),不進這個 repo;只留說明檔,
+# 讓 clone 下來就有 workspace/ 這個資料夾。
 workspace/*
-!workspace/example/
+!workspace/README.md
 
 # ── 打包 / 建置產物 ─────────────────────────────────────
 *.tar.gz

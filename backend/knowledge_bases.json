@@ -4,9 +4,9 @@
     "這份檔只列要多設定的專案(範例問題、預設模型、文件目錄,或專案在別的地方);",
     "workdir 跟 workspace 底下某個資料夾相同的,用這裡這一筆,不會重複出現。",
     "",
-    "範本只放一筆指向 repo 裡 `workspace/example/` 的範例。專案在 workspace 以外的地方,就加一筆寫它的絕對路徑。",
+    "範本是空的:專案都放 workspace/ 就不用動這份。專案在 workspace 以外的地方,就加一筆寫它的絕對路徑。",
     "這份檔只在啟動時讀一次,改完要重啟服務(workspace 底下新增的資料夾不用)。",
-    "路徑可以是絕對路徑,也可以是**相對於 backend/ 的路徑**(例如 ../workspace/example)。",
+    "路徑可以是絕對路徑,也可以是**相對於 backend/ 的路徑**(例如 ../workspace/toptest)。",
     "",
     "id            : 專案代號。會存進每一題的紀錄,建好之後不要改。",
     "label         : 顯示名稱。會出現在答案底下與匯出的 Markdown 裡。",
@@ -31,23 +31,8 @@
     "                前端優先序:這組對話手動選的 → 這裡 → 個人常用 → 全站預設。",
     "effort        : 選填。預設的思考力道(low / medium / high / xhigh / max),不在白名單就用全站的 CLAUDE_EFFORT。",
     "",
-    "default 指的是新對話用的那一筆,可以寫 workspace 底下的資料夾名。"
+    "default 指的是新對話用的那一筆,可以寫 workspace 底下的資料夾名;留空 = 專案清單的第一個。"
   ],
-  "default": "example",
-  "bases": [
-    {
-      "id": "example",
-      "label": "範例專案",
-      "workdir": "../workspace/example",
-      "code_roots": [],
-      "knowledge_dirs": [],
-      "skill_dir": "",
-      "note": "這是範例專案。把你的原始碼樹填進 code_roots、文件目錄填進 knowledge_dirs,並在這裡寫下這個專案特有的規則。",
-      "suggestions": [
-        "這個專案的整體架構是什麼?主要模組各負責什麼?",
-        "某個功能的主要流程是從哪裡進入、經過哪些檔案?",
-        "這個錯誤訊息是在哪裡丟出來的?可能的原因有哪些?"
-      ]
-    }
-  ]
+  "default": "",
+  "bases": []
 }

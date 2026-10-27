@@ -28,9 +28,9 @@
 
 ```
 askme\workspace\
-├─ example\     ← repo 附的範例專案(不要的話見下面「不要範例專案」)
 ├─ topprod\     ← 正式區
-│   ├─ CLAUDE.md          這個專案的規則:這是什麼專案、怎麼回答(範本 workspace\example\CLAUDE.md)
+│   ├─ CLAUDE.md          這個專案的規則:這是什麼專案、怎麼回答(範本 deploy\workdirs\CLAUDE.template.md)
+│   ├─ RULES-web-context.md   從 deploy\workdirs\ 複製一份,CLAUDE.md 引入它
 │   ├─ .claude\skills\    專案專用的 skill(選配)
 │   └─ tiptop\aap\4gl\…   程式碼本身
 └─ toptest\     ← 測試區,例:askme\workspace\toptest\tiptop\aap\4gl
@@ -51,12 +51,8 @@ askme\workspace\
 埠被佔了就換:`.\start.cmd -BackendPort 8124 -FrontendPort 5174`。
 
 用 **tiptop / tiptop** 登入(`backend\.env` 的 `ADMIN_USERNAME` / `ADMIN_PASSWORD`,給別人用之前改掉)。
-專案有兩個以上時,輸入框旁會有專案選單。管理員到「帳號管理」建同仁的帳號。
-
-**不要範例專案**:`workspace\example` 是 repo 附的範例(不是你的專案)。只刪資料夾不夠 ——
-它也登記在 `backend\knowledge_bases.json`,刪了資料夾選單上還是有「範例專案」,新對話也還是預設它。
-要整個拿掉:刪 `workspace\example`;`knowledge_bases.json` 的 `"default"` 改成你的資料夾名、
-`"bases"` 改成 `[]`;重啟(Ctrl+C 再 `.\start.cmd`)。只想讓新對話預設你的專案,改 `"default"` 就好。
+專案有兩個以上時,輸入框旁會有專案選單,新對話預設選第一個(照資料夾名排序);要固定預設哪一個,
+把 `backend\knowledge_bases.json` 的 `"default"` 填成那個資料夾名再重啟。管理員到「帳號管理」建同仁的帳號。
 
 <details>
 <summary>手動安裝與啟動(不用腳本、或在 Linux / macOS)</summary>
@@ -85,7 +81,7 @@ npm run dev
 </details>
 
 **讓 AI 帶第一次安裝**:clone 下來之後在 repo 根目錄開 `claude`,說「照 INSTALL.md 帶我安裝」。
-[`INSTALL.md`](INSTALL.md) 寫了它該怎麼帶(安裝 → 放專案 → 範例留不留 → 啟動指令)。
+[`INSTALL.md`](INSTALL.md) 寫了它該怎麼帶(下載 → 安裝 → 放專案 → 啟動指令)。
 (不放成根目錄的 `CLAUDE.md`:`workspace\` 的專案在 repo 底下,網頁問答時 claude 會往上層讀到它。)
 
 **資料庫**:預設 SQLite(`backend/data/app.db`),不用另外裝。多人用改 PostgreSQL:
@@ -109,7 +105,7 @@ npm run dev
 專案有兩個以上時,輸入框會多一顆下拉,列出這些資料夾讓你選;新對話用 `knowledge_bases.json` 的
 `default`(可以寫資料夾名),續問留在那組對話自己的專案。換資料夾路徑用 `.env` 的 `WORKSPACE_DIR`。
 
-每個專案資料夾裡放一份 `CLAUDE.md`,告訴模型「這是什麼專案、怎麼回答」(範本:`workspace/example/CLAUDE.md`)。
+每個專案資料夾裡放一份 `CLAUDE.md`,告訴模型「這是什麼專案、怎麼回答」(範本:`deploy/workdirs/CLAUDE.template.md`)。
 
 要多設定的專案(範例問題、預設模型、文件目錄、專案在別的地方)寫進 `backend/knowledge_bases.json`,
 欄位說明在那個檔的 `_說明`;json 已經列了同一個資料夾的,就用 json 那一筆。改 json 要重啟後端(只在啟動時讀一次)。
@@ -123,7 +119,7 @@ json 那一筆最少要有三個欄位:
 
 `deploy/workdirs/RULES-web-context.md` 是網頁情境跟人在終端機不同的幾條規則(正本)。
 每個專案的 workdir 放一份副本,`CLAUDE.md` 用 `@./RULES-web-context.md` 引入 ——
-範例 `workspace/example/` 就是這樣放的。Docker 版不用放副本:image 已經把正本設成每一題都載入的規則。
+範本 `deploy/workdirs/CLAUDE.template.md` 就是這樣寫的。Docker 版不用放副本:image 已經把正本設成每一題都載入的規則。
 ⚠️ **引入的檔一定要在 workdir 裡面。** headless(`claude -p`)模式下,指到 workdir 外面的引入
 (`@../../…`、`@~/…`)不會被載入,規則不生效,畫面上也看不出來。
 改規則時兩份一起改;`backend/tests/test_rules_copy.py` 會比對範例那份跟正本是否一致。
@@ -179,7 +175,7 @@ frontend/            React 19 + Astryx 設計系統(StyleX)的聊天介面
 deploy/              docker/(部署版,唯一的部署方式)、env.server.example(全部設定的完整清單)、
                      nginx 範本(選配的 https 前端)、workdirs/(身分檔範本與網頁情境規則)、
                      security_test.py(對本機或已部署的站跑安全檢查)
-workspace/           放你自己的專案(範例:workspace/example/,見「怎麼用」)
+workspace/           放你自己的專案(見「怎麼用」;repo 裡只有一份說明檔)
 scripts/             Windows 開發版的一鍵安裝 / 啟動(根目錄的 setup.cmd、start.cmd 叫的就是這兩支)
 pet-companion-kit/   小夥伴元件的 SPEC.md、README 與 examples/(程式碼本體在 frontend/src/pet)
 ```

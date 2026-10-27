@@ -188,7 +188,7 @@ def test_api_config_passes_knowledge_base_default_model(client, monkeypatch, tmp
     白名單在輸出時才比:config._load_knowledge_bases 跑的時候 ALLOWED_MODELS 還沒定義。
     """
     base = {"suggestions": [], "workdir": ""}
-    # 空的 workspace:只看這三筆,不要混進 repo 的 workspace/example
+    # 空的 workspace:只看這三筆,不要混進本機 workspace/ 底下放的專案
     monkeypatch.setattr(config, "WORKSPACE_DIR", tmp_path)
     monkeypatch.setattr(
         config,
@@ -203,24 +203,30 @@ def test_api_config_passes_knowledge_base_default_model(client, monkeypatch, tmp
     assert got == {"a": "sonnet", "b": None, "c": None}
 
 
-def test_範本只有一筆_example():
-    """範本只放一筆 `example`(只有一個專案時輸入框不出現專案下拉,永遠送 default_knowledge_base)。
-    json 加一筆或在 workspace 底下多放一個資料夾,專案超過一個,下拉就會出現。"""
+def test_範本是空的():
+    """範本不列任何專案、default 留空:專案全部來自 workspace/ 底下的資料夾,
+    新對話用專案清單的第一個(clone 下來不會多出一個不是自己的專案)。"""
     raw = json.loads(config.KNOWLEDGE_BASES_FILE.read_text(encoding="utf-8"))
-    assert [b["id"] for b in raw["bases"]] == ["example"]
-    assert raw["default"] == "example"
-    assert config.DEFAULT_KNOWLEDGE_BASE == "example"
+    assert raw["bases"] == []
+    assert raw["default"] == ""
 
 
-def test_範本的相對路徑相對於backend解析(monkeypatch):
-    """knowledge_bases.json 的 `../workspace/example` 要指到 repo 的 workspace/example,
+def test_default留空時用專案清單的第一個(monkeypatch, tmp_path):
+    (tmp_path / "toptest").mkdir()
+    (tmp_path / "topprod").mkdir()
+    monkeypatch.setattr(config, "WORKSPACE_DIR", tmp_path)
+    monkeypatch.setattr(config, "KNOWLEDGE_BASES", [])
+    monkeypatch.setattr(config, "DEFAULT_KNOWLEDGE_BASE", "")
+    assert config.default_knowledge_base() == "topprod"
+
+
+def test_範本的相對路徑相對於backend解析():
+    """knowledge_bases.json 的 `../workspace/toptest` 要指到 repo 的 workspace/toptest,
     不管 pytest / uvicorn 從哪個目錄起(config._kb_path)。"""
-    expected = str((config.BASE_DIR.parent / "workspace" / "example").resolve())
-    assert config._kb_path("../workspace/example") == expected
+    expected = str((config.BASE_DIR.parent / "workspace" / "toptest").resolve())
+    assert config._kb_path("../workspace/toptest") == expected
     assert config._kb_path("") == ""
     assert config._kb_path("/abs/path") == "/abs/path"
-    by_id = {b["id"]: b for b in config.KNOWLEDGE_BASES}
-    assert by_id["example"]["workdir"] == expected, "範例項目的 workdir 要真的存在、不退回 CLAUDE_WORKDIR"
 
 
 def test_環境的預設模型與effort打錯字要留log(monkeypatch, caplog):

@@ -23,9 +23,9 @@ CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "claude")
 # 底下的 session 檔。多個專案共用一個 cwd 時,專案 B 的規則會套在專案 A 的問題上,
 # 而且所有人的 session 全部混在同一個資料夾裡。
 #
-# 預設指到 repo 裡的 `workspace/example/`(範例工作目錄,裡面有一份最小的 CLAUDE.md),
-# 讓剛 clone 下來、還沒設 .env 的人也跑得起來。自己的專案放進 workspace/ 或在 .env 改這一條。
-CLAUDE_WORKDIR = os.environ.get("CLAUDE_WORKDIR", str(BASE_DIR.parent / "workspace" / "example"))
+# 預設指到 repo 的 `workspace/`(clone 下來就有,裡面只有一份說明檔),讓剛 clone、
+# 還沒放專案也還沒設 .env 的人也跑得起來。放了專案之後每一題都用那個專案的資料夾,用不到這裡。
+CLAUDE_WORKDIR = os.environ.get("CLAUDE_WORKDIR", str(BASE_DIR.parent / "workspace"))
 # 跨模組的比較型問題要翻好幾支大檔,所以給得很寬。
 # 逾時也不會整包丟掉 —— 已經寫出來的內容會保留並標記不完整(見 stream_agent)。
 CLAUDE_TIMEOUT_SEC = int(os.environ.get("CLAUDE_TIMEOUT_SEC", "3600"))
@@ -95,7 +95,7 @@ def _dir_or_warn(
 
 def _kb_path(value: str) -> str:
     """knowledge_bases.json 裡的路徑:絕對路徑原樣用;相對路徑**相對於 backend/**(BASE_DIR)解析,
-    不看行程的 cwd —— 服務從哪個目錄起、pytest 從哪裡跑,`../workspace/example` 都要指到同一個地方。
+    不看行程的 cwd —— 服務從哪個目錄起、pytest 從哪裡跑,`../workspace/toptest` 都要指到同一個地方。
     空字串原樣回(「沒填」要留給呼叫端判斷)。"""
     if not value:
         return ""
