@@ -1,0 +1,107 @@
+/* ===========================================================================
+   小夥伴的動畫(搭配 src/pet/PetCompanion.tsx)
+
+   把這個檔案 import 進你的全域 CSS 就好:
+       @import "./pet.css";
+   或在進入點 `import ".../styles/pet.css";`
+
+   這裡是**純 CSS**,不依賴 Tailwind —— 就算你的專案沒用 Tailwind,
+   動畫這部分照樣會動(只有元件裡的排版 class 需要 Tailwind)。
+
+   每一種動畫都對應真實狀態,不是隨機動作 ——
+   餘光掃過去就知道事情還在不在跑。
+   幅度刻意壓得很小:這是每天用八小時的工作工具,會動的東西一大就變干擾。
+   =========================================================================== */
+
+@keyframes pet-sleep {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(2px) scale(0.98);
+  }
+}
+
+@keyframes pet-wait {
+  0%,
+  100% {
+    transform: rotate(-4deg);
+  }
+  50% {
+    transform: rotate(4deg);
+  }
+}
+
+@keyframes pet-work {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-2deg);
+  }
+  25% {
+    transform: translateY(-4px) rotate(2deg);
+  }
+  75% {
+    transform: translateY(-1px) rotate(-1deg);
+  }
+}
+
+@keyframes pet-cheer {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  30% {
+    transform: translateY(-10px) scale(1.08);
+  }
+  60% {
+    transform: translateY(-3px) scale(1.02);
+  }
+}
+
+@keyframes pet-sad {
+  0%,
+  100% {
+    transform: translateY(3px) rotate(-8deg);
+  }
+  50% {
+    transform: translateY(4px) rotate(-10deg);
+  }
+}
+
+/* 閒著時的散步不在這裡:由 src/pet/usePetWander.ts 每一格直接寫 transform
+   (不翻面、隨機挑點、小夥伴小步跳、bloub 果凍滑行與滾動輪流;路線在 petWander.ts)。 */
+
+/* 狀態 class 拿掉時的回正(pet-sad 垂著頭、pet-wait 搖到一邊時換狀態)不在這裡:
+   CSS transition 不會從動畫中的值起跳(動畫的值不算在 transition 比的前後值裡),
+   所以由 PetCompanion.tsx 的 useSettleBack 讀當下的 transform、用 Web Animations 補回 0。 */
+
+.pet-sleep {
+  animation: pet-sleep 3.2s ease-in-out infinite;
+}
+.pet-wait {
+  animation: pet-wait 1.6s ease-in-out infinite;
+}
+.pet-work {
+  animation: pet-work 0.9s ease-in-out infinite;
+}
+.pet-cheer {
+  animation: pet-cheer 0.7s ease-out 2;
+}
+.pet-sad {
+  animation: pet-sad 2s ease-in-out infinite;
+}
+
+/* 使用者在系統關掉動畫效果時,整隻靜止。
+   狀態不會因此漏掉 —— 圖片本身、頭上那句台詞、aria-label 都還在。
+   (GIF 本身沒辦法用 CSS 停;真的要連 GIF 都停,就在 spriteOverrides 裡
+    換成靜態 PNG。) */
+@media (prefers-reduced-motion: reduce) {
+  .pet-sleep,
+  .pet-wait,
+  .pet-work,
+  .pet-cheer,
+  .pet-sad {
+    animation: none !important;
+  }
+}

@@ -1,0 +1,56 @@
+# ── 絕對不能上傳:密碼、設定、帳號、資料 ──────────────────
+# 這些含管理員密碼、資料庫密碼、所有人的問答紀錄。
+# 範本檔(.env.example / env.server.example)不受影響,會正常進 repo。
+# backend/users.json 程式不讀(帳號只在資料庫裡);萬一有人放了一份含密碼雜湊的,也不會進版控。
+**/.env
+**/.env.local
+**/.env.production
+backend/users.json
+# SSH 終端機的主機清單:位址與帳號是部署資訊,
+# 範本是 backend/terminal_hosts.example.json,真正的那份只留在主機上。
+backend/terminal_hosts.json
+# Work Flow 每塊拼圖的指令(連線、同步來源都是部署資訊),範本是 backend/workflow_actions.example.json。
+backend/workflow_actions.json
+backend/data/
+*.db
+*.sqlite
+*.sqlite3
+
+# 使用者透過網頁上傳的檔案(AGENT_KNOWLEDGE_DIR 設在 repo 根目錄的 agent-knowledge/ 時)。
+# 沒擋的話,測試上傳的文件會跟著 git add -A 進 repo。目錄由 uploads.py 在執行期自己建。
+# outputs/ 跟 uploads/ 同性質:agent 產出的檔案一樣含使用者資料。
+# (預設的 backend/data/agent-knowledge 已經被上面的 backend/data/ 擋掉。)
+agent-knowledge/uploads/
+agent-knowledge/outputs/
+
+# 備份檔
+*.bak
+
+# ── 打包 / 建置產物 ─────────────────────────────────────
+*.tar.gz
+# 打包檔的備份(askme.tar.gz.bak-…)
+*.tar.gz.*
+*.zip
+frontend/dist/
+
+# ── 依賴 ────────────────────────────────────────────────
+**/node_modules/
+**/.venv/
+**/__pycache__/
+**/*.pyc
+
+# ── 雜項 ────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.log
+
+# TypeScript 增量建置的快取,跟 dist 一樣是產物
+*.tsbuildinfo
+
+# ── 本機裝的 skill(npx skills add)───────────────────────
+# 這是「這台機器的工具」,不是專案的一部分:
+# 每個人裝的組合不一樣,skills-lock.json 還會鎖版本 —— 進版控只會製造沒有人想解的衝突。
+# 要用的人自己 npx skills add 一次就有。
+.agents/
+.claude/skills/
+skills-lock.json

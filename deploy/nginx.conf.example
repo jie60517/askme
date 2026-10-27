@@ -1,0 +1,98 @@
+# 選配:在 Docker 版前面加一層 https 時用的 nginx 設定範本
+# (網域 askme.example.com 換成你自己的;憑證路徑跟著換)。
+#
+# nginx 直接裝在主機上:放到 /etc/nginx/sites-available/askme 並 enable,`nginx -t && nginx -s reload`。
+# 這時 askme 容器看到的來源是 compose 網路的閘道位址,不是 127.0.0.1 ——
+# askme.env 要用 FORWARDED_ALLOW_IPS 信任那個位址(見 env.server.example),不然這裡送的
+# X-Forwarded-* 會被丟掉;再把 deploy/docker/.env 的 ASKME_BIND 改成 127.0.0.1,
+# 同仁就繞不過 nginx 直連 8100。
+# nginx 也跑在容器裡:FORWARDED_ALLOW_IPS 填 nginx 容器的位址;底下 snippet 的 proxy_pass
+# 改成主機的 LAN 位址(容器裡的 127.0.0.1 不是主機)。
+#
+# 這份的重點不是轉發,是**站在 uvicorn 前面擋掉的東西**。每一段都有理由,不要為了精簡拿掉。
+
+# 登入端點的速率限制:每個來源 IP 每秒 2 次、允許短暫爆量 5 次。
+# 後端自己有帳號層 5 次/15 分與 IP 層的鎖定,這一層擋的是「一秒幾百次」那種。
+limit_req_zone $binary_remote_addr zone=login:1m rate=2r/s;
+# 問答與上傳:每 IP 每秒 5 次。正常使用一分鐘不會超過幾次。
+limit_req_zone $binary_remote_addr zone=api:10m rate=5r/s;
+
+server {
+    listen 80;
+    server_name askme.example.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name askme.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/askme.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/askme.example.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    # 不要把版本號放進 Server 標頭告訴全世界。
+    server_tokens off;
+
+    # 請求本文上限。後端自己也擋(security.BodySizeLimit),這裡是第一道:
+    # 超過的請求連 uvicorn 都不會碰到。要跟 .env 的 MAX_REQUEST_MB 一致或更小。
+    client_max_body_size 100m;
+    # 讀本文的逾時:慢速送 body 佔住連線(slowloris)的請求 30 秒就斷。
+    client_body_timeout 30s;
+    client_header_timeout 15s;
+
+    # HSTS:瀏覽器一年內只走 https。後端在 https 連線上也會送同一個標頭,
+    # 這裡再送一次是為了 nginx 自己回的 301/錯誤頁也有。
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+    # SSH 終端機(側邊欄 SSH Server)的 WebSocket。要另外一個 location,三個理由:
+    #   1. Upgrade / Connection 標頭不送的話,握手會被當成一般 GET 轉過去,後端回 4xx,
+    #      前端只看得到「連線中斷(網路或伺服器重新啟動)」。
+    #   2. **閒置預設不自動斷線**(SSH_TERMINAL_IDLE_TIMEOUT_SEC=0)。
+    #      那時候真正撐住連線的是 SSH_TERMINAL_KEEPALIVE_SEC(預設 240):後端定期送一則
+    #      訊息,proxy 看到有流量就不會切。**keepalive 要明顯小於底下的 proxy_read_timeout**。
+    #      ⚠️ 把 IDLE 填回秒數(例如 600)的話,換成 proxy_read_timeout 要**大於**它:
+    #      nginx 預設 60 秒沒流量就切,使用者看到的會是「網路中斷」而不是「十分鐘沒有操作」。
+    #   3. 不套 limit_req:一條終端機只有一次握手。檔案欄那幾支(/api/terminal/files*)
+    #      是一般 HTTP,照樣走下面 /api/ 的限流 —— 所以這裡用 `=` 只收 ws 這一條。
+    location = /api/terminal/ws {
+        include /etc/nginx/snippets/askme-proxy.conf;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 660s;
+        proxy_send_timeout 660s;
+    }
+
+    location /api/login {
+        limit_req zone=login burst=5 nodelay;
+        include /etc/nginx/snippets/askme-proxy.conf;
+    }
+
+    location /api/ {
+        limit_req zone=api burst=20 nodelay;
+        include /etc/nginx/snippets/askme-proxy.conf;
+    }
+
+    location / {
+        include /etc/nginx/snippets/askme-proxy.conf;
+    }
+}
+
+# ------------------------------------------------------------------ /etc/nginx/snippets/askme-proxy.conf
+# 三個 location 共用的轉發設定。抽出來免得改了一處漏兩處。
+#
+#   proxy_pass http://127.0.0.1:8100;        # nginx 跑在容器裡的話要改成主機的 LAN 位址(容器裡的 127.0.0.1 不是主機)
+#   proxy_http_version 1.1;
+#
+#   ⚠️ 這兩個標頭一定要送:uvicorn 靠它們還原客戶端 IP 與 https。
+#   但送了還不夠 —— uvicorn 只在來源位址落在 FORWARDED_ALLOW_IPS 時才信,見 env.server.example。
+#   少了 X-Forwarded-For,後端看到的所有人都是 127.0.0.1,IP 層鎖定會變成
+#   「任何人打錯 10 次就把所有人鎖在外面」;少了 X-Forwarded-Proto,登入 cookie 不會標 Secure。
+#   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+#   proxy_set_header X-Forwarded-Proto $scheme;
+#   proxy_set_header Host $host;
+#
+#   問答是長連線串流(NDJSON),最長一小時(CLAUDE_TIMEOUT_SEC)。不關 buffering 的話
+#   使用者要等整題跑完才一次看到答案;read timeout 也要跟著拉長。
+#   proxy_buffering off;
+#   proxy_read_timeout 3700s;

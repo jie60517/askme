@@ -1,0 +1,6 @@
+# 部署時才填的檔:有密碼、API key 或部署地點專屬的設定,不進版控
+.env
+askme.env
+knowledge_bases.json
+ssh/*
+!ssh/README.md

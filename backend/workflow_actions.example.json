@@ -1,0 +1,36 @@
+{
+  "_comment": [
+    "Work Flow(排程拼圖)每塊拼圖跑什麼指令。**這是可選功能**:",
+    "把這個檔複製成 backend/workflow_actions.json 再改,重啟服務後側邊欄 SSH Server 底下就會出現 Work Flow;",
+    "沒有 workflow_actions.json 的話整個功能不出現(側邊欄沒有那一列、/api/workflows 是 404、排程器不啟動)。",
+    "改完要重啟服務才生效。複製出來的那份**不進版控**(VPN、同步來源是部署資訊),而且裡面**不放密碼**。",
+    "",
+    "瀏覽器只能「選清單裡的哪一個」,永遠送不了指令;使用者自己打的只有同步的兩個目錄與腳本路徑,",
+    "後端先用白名單擋過(只收英數與 . _ - /)再 shell-quote 套進 {src} {dst}。",
+    "",
+    "指令全部在 base_host 那一台跑(terminal_hosts.json 的 id,沒填就是第一台)。",
+    "結束代碼 0 = 成功,其他 = 失敗(走拼圖的「失敗」出口)。**每一支都建議包 timeout**:",
+    "按停止只會關掉 SSH 通道,主機那頭的行程不一定會跟著死。",
+    "",
+    "clients.<客戶名>:客戶只在「連線客戶」選,後面的拼圖沿用它。vpn_up / vpn_down 裡可以用 {client} 代表客戶名",
+    "  vpn_up / vpn_down   撥 / 斷這個客戶的 VPN,一般的 shell 指令(在 base_host 上跑)。",
+    "                      流程結束時還沒斷的,後端會自己跑 vpn_down。",
+    "  host                選填。客戶主機是 terminal_hosts.json 的哪一台:「連線客戶」撥完 VPN 就連上它,",
+    "                      接在後面的「執行腳本」在這台跑。不填就只撥 VPN,腳本照舊在 base_host 跑",
+    "  sync                同步指令。可用 {src} {dst}(兩個目錄都由使用者在拼圖上填);**一定要有 {delete}**",
+    "                      (後端填 --delete-delay:目的目錄跟來源一模一樣,來源沒有的檔案傳完後刪掉;少了它這一步直接失敗);",
+    "                      {exclude} {mode} 一律是空字串,留著不會壞;rsync 加 --info=progress2 畫面才有進度條,",
+    "                      加 --stats 完成時才會顯示更新了幾個檔案。",
+    "(「執行腳本」是使用者在拼圖上打的路徑,用什麼跑看副檔名;這裡不用列)",
+    "「通知人員」不用設定:選的是站上的帳號與群組,通知走站內(跟聊天被 @ 一樣)"
+  ],
+  "base_host": "main",
+  "clients": {
+    "客戶A": {
+      "host": "main",
+      "vpn_up": "timeout 120 sudo /usr/local/sbin/vpn-connect {client}",
+      "vpn_down": "timeout 60 sudo /usr/local/sbin/vpn-disconnect {client}",
+      "sync": "timeout 1800 rsync -az {delete} --info=progress2 --stats customer-a:{src}/ {dst}/"
+    }
+  }
+}

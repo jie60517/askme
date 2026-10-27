@@ -1,0 +1,107 @@
+/*
+ * pet-companion-kit 的 Tailwind 墊片。
+ *
+ * kit(`src/pet/`)是外來的可攜元件包,className 寫的是 Tailwind 的工具類 ——
+ * 這個專案**沒有** Tailwind(慣例:StyleX + Astryx token),又不想改 kit 的
+ * 檔案(升級時要能直接覆蓋)。所以把 kit **實際用到的那幾十個類**在這裡
+ * 用 Astryx token 實作一份。只此一份、只給小夥伴用:
+ *
+ * ⚠️ 別的元件不要用這些類名 —— 這不是要引進工具類寫法,是給一個
+ *    vendored 元件的相容層。新 UI 照舊走 stylex.create()。
+ * ⚠️ kit 升級時 grep 它的 className,少什麼補什麼;沒用到的不要先寫
+ *   (寫了沒人用的類就是死碼,還會讓人以為站上有 Tailwind)。
+ *
+ * 顏色對應(kit 的 tooltip 是 shadcn 的 foreground/background 慣例):
+ *   bg-foreground → --color-text-primary(深底,深色佈景自己翻面)
+ *   text-background → --color-background-body(淺字)
+ *   bg-muted/60 → --color-neutral 的 60% (替代圖示的圓底)
+ *   ring → --focus-outline-color
+ */
+
+/* ── 版面 ── */
+.fixed { position: fixed; }
+.absolute { position: absolute; }
+.relative { position: relative; }
+.flex { display: flex; }
+.hidden { display: none; }
+/*
+ * 要排在 .hidden 後面才蓋得過它(kit 用的是 `hidden md:block` 這個組合)。
+ *
+ * ⚠️ 手機斷點的**唯一來源是 `App.tsx` 的 `isMobile`**(`lib/media.ts` 的
+ * `MOBILE_QUERY`),它在手機上讓整個 `<PetCompanion>` 連渲染都不渲染。
+ * 這兩行是 kit 自己帶來的第二道,留著是為了不改 kit 的 className;它的
+ * `min-width: 768px` 與 `MOBILE_QUERY` 的 `max-width: 768px` 剛好在 768px
+ * 那一格同時成立,對不上的時候以 `App.tsx` 為準。
+ */
+@media (min-width: 768px) {
+  .md\:block { display: block; }
+}
+.items-center { align-items: center; }
+.justify-center { justify-content: center; }
+.z-40 { z-index: 40; }
+.z-50 { z-index: 50; }
+.inset-0 { inset: 0; }
+.bottom-28 { bottom: 7rem; }
+.right-4 { right: 1rem; }
+.left-1\/2 { left: 50%; }
+.top-\[calc\(100\%-0\.25rem\)\] { top: calc(100% - 0.25rem); }
+/* 滑鼠感應區(對齊角色實際佔的位置,kit 逐影格量出來的百分比) */
+.bottom-\[8\%\] { bottom: 8%; }
+.left-\[17\%\] { left: 17%; }
+.right-\[20\%\] { right: 20%; }
+.top-\[34\%\] { top: 34%; }
+/* Blob 的感應區:球置中、直徑約框的 49%(112 × 0.63 / 144)。
+   ⚠️ 少了這一條感應區就是 0×0 —— 滑鼠移上去不出台詞、散步也不停 */
+.inset-\[25\%\] { inset: 25%; }
+
+/* ── 尺寸 ── */
+.w-max { width: max-content; }
+.max-w-64 { max-width: 16rem; }
+.size-2 { width: 0.5rem; height: 0.5rem; }
+.size-8 { width: 2rem; height: 2rem; }
+.size-16 { width: 4rem; height: 4rem; }
+.size-36 { width: 9rem; height: 9rem; }
+.size-full { width: 100%; height: 100%; }
+.object-contain { object-fit: contain; }
+
+/* ── transform:氣泡置中與尖角要能**疊加**(同一個元素同時 -translate 和 rotate) ── */
+.-translate-x-1\/2,
+.rotate-45 {
+  transform: translateX(var(--pet-tx, 0)) rotate(var(--pet-rot, 0deg));
+}
+.-translate-x-1\/2 { --pet-tx: -50%; }
+.rotate-45 { --pet-rot: 45deg; }
+.origin-bottom { transform-origin: bottom; }
+.\[transform-style\:preserve-3d\] { transform-style: preserve-3d; }
+
+/* ── 長相 ── */
+.rounded-full { border-radius: var(--radius-full); }
+.rounded-lg { border-radius: var(--radius-element); }
+.bg-foreground { background-color: var(--color-text-primary); }
+.text-background { color: var(--color-background-body); }
+.bg-muted\/60 {
+  background-color: color-mix(in oklab, var(--color-neutral) 60%, transparent);
+}
+.backdrop-blur { backdrop-filter: blur(8px); }
+.shadow-lg { box-shadow: var(--shadow-high); }
+.px-3 { padding-inline: var(--spacing-3); }
+.py-1\.5 { padding-block: var(--spacing-1-5); }
+.text-center { text-align: center; }
+.text-xs { font-size: 0.75rem; line-height: 1rem; }
+.font-medium { font-weight: var(--font-weight-medium); }
+.underline-offset-2 { text-underline-offset: 2px; }
+/* 只給有滑鼠的裝置:觸控的假 :hover 會黏住,底線一直掛著(條件同 lib/media.ts 的 HOVER_QUERY) */
+@media (hover: hover) and (pointer: fine) {
+  .hover\:underline:hover { text-decoration: underline; }
+}
+
+/* ── 互動 ── */
+.select-none { user-select: none; }
+.touch-none { touch-action: none; }
+.cursor-grab { cursor: grab; }
+.cursor-grabbing { cursor: grabbing; }
+.outline-none { outline: none; }
+/* kit 的 focus ring(ring-2 + ring-ring 兩個類一組;顏色併進來寫) */
+.focus-visible\:ring-2:focus-visible {
+  box-shadow: 0 0 0 2px var(--focus-outline-color);
+}

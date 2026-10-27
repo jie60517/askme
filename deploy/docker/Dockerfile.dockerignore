@@ -1,0 +1,38 @@
+# 放在 Dockerfile 旁邊、檔名是 <Dockerfile>.dockerignore:BuildKit 只認這一份
+# (repo 根目錄若有 .dockerignore 也不會被讀)。
+# 寫成「全部排除、再放行」—— 漏寫一條的後果是少東西(build 會失敗),
+# 而不是把 .env、資料庫或專案清單打進 image。
+*
+!backend
+!frontend
+!deploy/docker/entrypoint.py
+!deploy/workdirs/RULES-web-context.md
+
+# ---- 放行的目錄裡仍然不能進 image 的
+#
+# 專案清單:由部署資料夾提供(compose 掛到 /opt/askme/config/knowledge_bases.json)。
+backend/knowledge_bases.json
+# 密碼、資料、主機專屬設定
+backend/.env
+backend/.env.*
+backend/data
+backend/terminal_hosts.json
+backend/terminal_hosts.example.json
+backend/workflow_actions.json
+# 開發用物(dev_*_demo.py 會起一個不驗證的假主機)
+backend/dev_*_demo.py
+backend/.venv
+backend/tests
+backend/requirements-dev.txt
+backend/.pytest_cache
+**/__pycache__
+**/*.pyc
+
+# 前端:image 裡自己 npm ci / build,本機的 node_modules 與 dist 不要帶進來
+# (帶進來會蓋掉 image 裡裝的那份,而本機可能是 Windows 的原生模組)。
+frontend/node_modules
+frontend/dist
+frontend/.env
+frontend/.env.*
+frontend/.claude
+frontend/mockups

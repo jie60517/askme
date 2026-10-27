@@ -1,0 +1,53 @@
+{
+  "_說明": [
+    "workspace/ 底下的每個資料夾會**自動**當成一個專案(名字就是資料夾名),不必寫進這裡。",
+    "這份檔只列要多設定的專案(範例問題、預設模型、文件目錄,或專案在別的地方);",
+    "workdir 跟 workspace 底下某個資料夾相同的,用這裡這一筆,不會重複出現。",
+    "",
+    "範本只放一筆指向 repo 裡 `workspace/example/` 的範例。專案在 workspace 以外的地方,就加一筆寫它的絕對路徑。",
+    "這份檔只在啟動時讀一次,改完要重啟服務(workspace 底下新增的資料夾不用)。",
+    "路徑可以是絕對路徑,也可以是**相對於 backend/ 的路徑**(例如 ../workspace/example)。",
+    "",
+    "id            : 專案代號。會存進每一題的紀錄,建好之後不要改。",
+    "label         : 顯示名稱。會出現在答案底下與匯出的 Markdown 裡。",
+    "workdir       : 該專案的工作目錄,也就是 claude 子行程的 cwd。決定的是**「我是誰」**",
+    "                —— 那個目錄的 CLAUDE.md、`.claude/skills/`,以及 session 會存進",
+    "                ~/.claude/projects/ 底下哪一格。跟 code_roots/knowledge_dirs 那組",
+    "                「讀得到什麼」是兩件不同的事,兩邊都要設。",
+    "                填的目錄**必須存在**;不存在會退回 .env 的 CLAUDE_WORKDIR 並在",
+    "                服務 log 留一行 warning —— 服務照跑、答案照出,但那個專案的",
+    "                規則/skill/session 隔離不會生效,而畫面上完全看不出來。",
+    "code_roots    : 原始碼樹(可以多棵)。第一棵會被拿來當顯示來源時的路徑前綴。",
+    "                找不到的只在服務 log 留一行 warning,那一題就讀不到程式碼。",
+    "knowledge_dirs: 該專案自己的文件目錄。",
+    "                **指到最小可用的子目錄,不要圖方便掛根目錄** —— 掛根目錄等於把",
+    "                不相干的資料一起掛上去。只收目錄,不收單檔。",
+    "skill_dir     : 選填。填一個「裡面有 .claude/skills/ 的目錄」,那個目錄的 skill 就會載進這個專案",
+    "                (機制是 --add-dir)。⚠️ 這個目錄會被掛成**唯讀可讀**,所以裡面只放 skill。",
+    "                路徑不存在或底下沒有 .claude/skills/ 就當沒填,並留一行 warning。",
+    "note          : 會原封不動寫進每次提問的提示裡,放這個專案特有的注意事項。",
+    "suggestions   : 空白頁上的範例問題(最多 4 題,可省略;省略就用內建的通用範例)。",
+    "default_model : 選填。這個專案預設用的模型(sonnet / opus,不在白名單當沒填)。",
+    "                前端優先序:這組對話手動選的 → 這裡 → 個人常用 → 全站預設。",
+    "effort        : 選填。預設的思考力道(low / medium / high / xhigh / max),不在白名單就用全站的 CLAUDE_EFFORT。",
+    "",
+    "default 指的是新對話用的那一筆,可以寫 workspace 底下的資料夾名。"
+  ],
+  "default": "example",
+  "bases": [
+    {
+      "id": "example",
+      "label": "範例專案",
+      "workdir": "../workspace/example",
+      "code_roots": [],
+      "knowledge_dirs": [],
+      "skill_dir": "",
+      "note": "這是範例專案。把你的原始碼樹填進 code_roots、文件目錄填進 knowledge_dirs,並在這裡寫下這個專案特有的規則。",
+      "suggestions": [
+        "這個專案的整體架構是什麼?主要模組各負責什麼?",
+        "某個功能的主要流程是從哪裡進入、經過哪些檔案?",
+        "這個錯誤訊息是在哪裡丟出來的?可能的原因有哪些?"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,304 @@
+/*
+ * 個人筆記編輯器(components/notes/NoteEditor.tsx)的內文樣式。
+ *
+ * 為什麼是一個 .css 而不是 StyleX:編輯器裡的 <h2>、<li>、<table> 是 ProseMirror 自己長出來的 DOM,
+ * StyleX 只能掛在我們自己畫的元素上,碰不到它們。所以只在這裡、只限 `.note-editor` 底下。
+ *
+ * 數值全是 Astryx token,字級與上下間距照 Astryx `Markdown` 元件的預設密度(node_modules/@astryxdesign/core/src/Markdown),
+ * 跟對話裡的回答是同一套 —— 從對話存進來的那則,打開時看起來跟對話裡一樣。
+ */
+.note-editor-content {
+  outline: none;
+  color: var(--color-text-primary);
+  font-family: var(--font-family-body);
+  /* 字級(接近 Notion):內文 17px / 行高 1.5,標題各往上一階 —— 只放大筆記,其他頁不變。
+     下面幾處要「一行多高」的(待辦勾選框)都用這兩個變數 */
+  --note-text-size: var(--font-size-lg);
+  --note-text-leading: 1.5;
+  font-size: var(--note-text-size);
+  line-height: var(--note-text-leading);
+  overflow-wrap: break-word;
+}
+.note-editor-content > :first-child { margin-top: 0; }
+.note-editor-content > :last-child { margin-bottom: 0; }
+
+/* 段落跟著上面的字級(全站有一條把 <p> 釘在內文 14px 的規則,不寫的話放大只放到標題) */
+.note-editor-content p { margin: var(--spacing-3) 0; font-size: inherit; line-height: inherit; }
+.note-editor-content h1,
+.note-editor-content h2,
+.note-editor-content h3,
+.note-editor-content h4 { font-family: var(--font-family-heading); color: var(--color-text-primary); }
+.note-editor-content h1 { font-size: var(--text-display-3-size); font-weight: var(--text-heading-1-weight); line-height: var(--text-display-3-leading); margin: var(--spacing-6) 0 var(--spacing-3); }
+.note-editor-content h2 { font-size: var(--text-heading-1-size); font-weight: var(--text-heading-2-weight); line-height: var(--text-heading-1-leading); margin: var(--spacing-6) 0 var(--spacing-3); }
+.note-editor-content h3 { font-size: var(--text-heading-2-size); font-weight: var(--text-heading-3-weight); line-height: var(--text-heading-2-leading); margin: var(--spacing-4) 0 var(--spacing-2); }
+.note-editor-content h4 { font-size: var(--text-heading-3-size); font-weight: var(--text-heading-4-weight); line-height: var(--text-heading-3-leading); margin: var(--spacing-4) 0 var(--spacing-2); }
+
+.note-editor-content strong { font-weight: var(--font-weight-semibold); }
+.note-editor-content s { color: var(--color-text-secondary); }
+.note-editor-content a { color: inherit; text-decoration: underline; text-underline-offset: var(--spacing-0-5); }
+.note-editor-content code {
+  font-family: var(--font-family-code);
+  font-size: var(--text-code-size);
+  background: var(--color-background-muted);
+  padding: 0 var(--spacing-1);
+  border-radius: var(--radius-inner);
+}
+
+/* 清單:reset.css 把清單符號拿掉了,這裡補回來 */
+.note-editor-content ul,
+.note-editor-content ol { margin: var(--spacing-3) 0; padding-inline-start: var(--spacing-6); }
+.note-editor-content ul { list-style: disc; }
+.note-editor-content ol { list-style: decimal; }
+.note-editor-content li::marker { color: var(--color-text-secondary); }
+.note-editor-content li > p { margin: var(--spacing-1) 0; }
+
+/* 待辦:可以直接勾;勾掉的變灰、劃線 */
+.note-editor-content ul[data-type='taskList'] { list-style: none; padding-inline-start: 0; }
+.note-editor-content ul[data-type='taskList'] li { display: flex; gap: var(--spacing-2); align-items: flex-start; margin: var(--spacing-1) 0; }
+.note-editor-content ul[data-type='taskList'] li > label {
+  display: flex;
+  align-items: center;
+  height: calc(var(--note-text-size) * var(--note-text-leading));
+}
+.note-editor-content ul[data-type='taskList'] li > div { flex: 1; min-width: 0; }
+.note-editor-content ul[data-type='taskList'] li > div > p { margin: 0; }
+.note-editor-content ul[data-type='taskList'] input { accent-color: var(--color-text-primary); width: var(--spacing-4); height: var(--spacing-4); margin: 0; }
+.note-editor-content ul[data-type='taskList'] li[data-checked='true'] > div { color: var(--color-text-secondary); text-decoration: line-through; }
+
+.note-editor-content blockquote {
+  margin: var(--spacing-4) 0;
+  padding-inline-start: var(--spacing-4);
+  border-inline-start: var(--spacing-0-5) solid var(--color-border-emphasized);
+  color: var(--color-text-secondary);
+}
+.note-editor-content blockquote p { margin: 0; }
+.note-editor-content hr { border: 0; border-top: var(--border-width) solid var(--color-border); margin: var(--spacing-6) 0; }
+.note-editor-content hr.ProseMirror-selectednode { border-top-color: var(--color-text-primary); }
+
+/* 程式碼區塊 */
+.note-editor-code { margin: var(--spacing-4) 0; }
+.note-editor-code pre {
+  margin: 0;
+  padding: var(--spacing-4);
+  background: var(--color-background-muted);
+  border-radius: var(--radius-element);
+  overflow-x: auto;
+}
+.note-editor-code pre code { background: none; padding: 0; border-radius: 0; }
+
+/* 圖片:右上角「看大圖」平常藏著,滑過去 / 選取 / 觸控螢幕才出來 */
+.note-editor-image { position: relative; margin: var(--spacing-3) 0; width: fit-content; max-width: 100%; }
+.note-editor-image img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: var(--border-width) solid var(--color-border-emphasized);
+  border-radius: var(--radius-element);
+}
+.note-editor-image[data-selected] img { outline: var(--focus-outline-width) var(--focus-outline-style) var(--focus-outline-color); }
+.note-editor-image-action { position: absolute; top: var(--spacing-2); right: var(--spacing-2); opacity: 0; transition: opacity var(--duration-fast) var(--ease-standard); }
+.note-editor-image:hover .note-editor-image-action,
+.note-editor-image[data-selected] .note-editor-image-action,
+.note-editor-image-action:focus-within { opacity: 1; }
+@media (pointer: coarse) { .note-editor-image-action { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .note-editor-image-action { transition: none; } }
+
+/* 表格:每一格都有框線(照 Notion),字跟內文同一條左緣。只管 Tiptap 的表格(.tableWrapper)—— 資料庫用的是 Astryx 的 Table,不要套到 */
+.note-editor-content .tableWrapper { margin: var(--spacing-4) 0; overflow-x: auto; }
+.note-editor-content .tableWrapper table { border-collapse: collapse; width: 100%; }
+.note-editor-content .tableWrapper th,
+.note-editor-content .tableWrapper td {
+  text-align: start;
+  vertical-align: top;
+  padding: var(--spacing-1-5) var(--spacing-2);
+  border: var(--border-width) solid var(--color-border);
+}
+.note-editor-content .tableWrapper th { font-weight: var(--font-weight-semibold); background: var(--color-background-gray); }
+.note-editor-content .tableWrapper th p,
+.note-editor-content .tableWrapper td p { margin: 0; }
+.note-editor-content .selectedCell { background: var(--color-overlay-hover); }
+
+/* 淡灰提示字(畫面不放說明文字的例外):空白筆記的第一行、游標所在的空行。字由 Placeholder 擴充寫進 data-placeholder */
+/* 疊在那一行上面(absolute),不佔位置:游標一定在行首,跟上下行的字同一條線
+   (用 float 的話 Chrome 會把游標擠到提示字後面一點,空行看起來往右縮) */
+.note-editor-content .is-empty { position: relative; }
+.note-editor-content .is-empty::before {
+  content: attr(data-placeholder);
+  position: absolute;
+  inset-inline-start: 0;
+  top: 0;
+  white-space: nowrap;
+  pointer-events: none;
+  color: var(--color-text-disabled);
+}
+/* 游標所在空行那句只在編輯器有焦點時出(Notion 也是);空白筆記第一行那句一直在 */
+.note-editor-content:not(.ProseMirror-focused) .is-empty:not(.is-editor-empty)::before { content: none; }
+
+/* 圖片拉寬度:外框跟著 width%,左右兩條把手滑過才出來;置中 */
+.note-editor-image { width: auto; }
+.note-editor-image[data-align='center'] .note-editor-image-frame { margin-inline: auto; }
+.note-editor-image-frame { position: relative; width: fit-content; max-width: 100%; }
+.note-editor-image-frame img { width: 100%; }
+.note-editor-image-grip {
+  position: absolute;
+  top: 50%;
+  width: var(--spacing-1-5);
+  height: var(--spacing-12);
+  transform: translateY(-50%);
+  border-radius: var(--radius-full);
+  background: var(--color-text-secondary);
+  border: var(--border-width) solid var(--color-background-surface);
+  cursor: ew-resize;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-standard);
+}
+.note-editor-image-grip[data-side='left'] { left: var(--spacing-2); }
+.note-editor-image-grip[data-side='right'] { right: var(--spacing-2); }
+.note-editor-image:hover .note-editor-image-grip,
+.note-editor-image[data-selected] .note-editor-image-grip { opacity: 1; }
+.note-editor-image-caption {
+  display: block;
+  width: 100%;
+  margin-top: var(--spacing-1);
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  font-size: var(--text-supporting-size);
+  color: var(--color-text-secondary);
+}
+.note-editor-image[data-align='center'] .note-editor-image-caption { text-align: center; }
+.note-editor-image-caption:placeholder-shown { opacity: 0; }
+.note-editor-image:hover .note-editor-image-caption:placeholder-shown,
+.note-editor-image-caption:focus { opacity: 1; }
+@media (pointer: coarse) { .note-editor-image-grip { display: none; } }
+@media (prefers-reduced-motion: reduce) { .note-editor-image-grip { transition: none; } }
+
+/* 程式碼區塊:右上角語言與複製,滑過才出來 */
+.note-editor-code { position: relative; }
+.note-editor-code-tools { position: absolute; top: var(--spacing-1); right: var(--spacing-1); opacity: 0; transition: opacity var(--duration-fast) var(--ease-standard); }
+.note-editor-code:hover .note-editor-code-tools,
+.note-editor-code-tools:focus-within { opacity: 1; }
+@media (pointer: coarse) { .note-editor-code-tools { opacity: 1; } }
+
+/* 提示框:左邊一個線條圖示、右邊內容,淡灰底 */
+.note-editor-callout {
+  display: flex;
+  gap: var(--spacing-2);
+  align-items: flex-start;
+  margin: var(--spacing-3) 0;
+  padding: var(--spacing-3) var(--spacing-4) var(--spacing-3) var(--spacing-2);
+  border-radius: var(--radius-element);
+  background: var(--color-background-gray);
+}
+/* 圖示鈕(28)比一行字(24)高一點:往上拉 2,跟第一行字置中 */
+.note-editor-callout-icon { flex: none; margin-block: calc(var(--spacing-0-5) * -1); }
+.note-editor-callout-body { flex: 1; min-width: 0; }
+.note-editor-callout-body > :first-child,
+.note-editor-callout-body > * > :first-child { margin-top: 0; }
+.note-editor-callout-body > :last-child,
+.note-editor-callout-body > * > :last-child { margin-bottom: 0; }
+
+/* 可收合清單:左邊一個三角形,收起來時內容藏著 */
+/* 三角形(24)後面不留間距:字才跟項目清單的字同一條線(都在 24px) */
+.note-editor-content .note-details { display: flex; gap: 0; align-items: flex-start; margin: var(--spacing-1) 0; }
+.note-editor-content .note-details > button {
+  flex: none;
+  width: var(--spacing-6);
+  height: var(--spacing-6);
+  margin-top: calc(var(--spacing-0-5) * -1);
+  border: 0;
+  border-radius: var(--radius-inner);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.note-editor-content .note-details > button::before {
+  content: '';
+  border-style: solid;
+  border-width: var(--spacing-1) 0 var(--spacing-1) var(--spacing-1-5);
+  border-color: transparent transparent transparent currentColor;
+  transition: transform var(--duration-fast) var(--ease-standard);
+}
+.note-editor-content .note-details.is-open > button::before { transform: rotate(90deg); }
+.note-editor-content .note-details > button:hover { background: var(--color-overlay-hover); }
+.note-editor-content .note-details > div { flex: 1; min-width: 0; }
+.note-editor-content .note-details summary { display: block; list-style: none; }
+.note-editor-content .note-details summary::-webkit-details-marker { display: none; }
+.note-editor-content .note-details [data-type='detailsContent'] > :first-child { margin-top: var(--spacing-1); }
+@media (prefers-reduced-motion: reduce) { .note-editor-content .note-details > button::before { transition: none; } }
+
+/* 子頁連結:整塊選取時一圈焦點框 */
+.note-editor-pagelink { margin: var(--spacing-1) 0; }
+/* 資料庫不畫選取框:在格子裡打字時整塊都算「選取」,一直套著一圈粗框 */
+.note-editor-pagelink[data-selected] { outline: var(--focus-outline-width) var(--focus-outline-style) var(--focus-outline-color); border-radius: var(--radius-element); }
+/* 資料庫每一列的「⋯」「打開」、空格的提示,滑過那一列才出來(每一列都掛著看起來很亂) */
+.note-editor-database .note-editor-db-hover { opacity: 0; transition: opacity var(--duration-fast) var(--ease-standard); }
+.note-editor-database tr:hover .note-editor-db-hover,
+.note-editor-database .note-editor-db-hover:focus-within,
+.note-editor-database .note-editor-db-hover:has([aria-expanded='true']) { opacity: 1; }
+@media (pointer: coarse) { .note-editor-database .note-editor-db-hover { opacity: 1; } }
+
+/* 資料庫裡的格子:沒有框的輸入(Astryx 的輸入框都有框,一格一格框起來太吵) */
+.note-editor-db-title,
+.note-editor-db-input {
+  width: 100%;
+  min-width: 0;
+  padding: var(--spacing-1) 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  color: var(--color-text-primary);
+}
+.note-editor-db-title { font-size: var(--text-heading-4-size); font-weight: var(--text-heading-4-weight); }
+.note-editor-db-title::placeholder,
+.note-editor-db-input::placeholder { color: var(--color-text-disabled); }
+.note-editor-db-input:focus { box-shadow: inset 0 calc(var(--border-width) * -1) 0 var(--color-border-emphasized); }
+
+/* 區塊把手拖曳中:被拖的那一塊變淡(落點是 BlockHandle 畫的那條線) */
+.note-editor-content .note-editor-dragging { opacity: 0.4; }
+
+/* 「轉換成」子選單(BlockHandle 的 DropdownMenuSubMenu):Astryx 把子選單寫死最高 300px,11 種要捲才看得完。
+   ⚠️ 這條是本檔規矩的例外:
+   - 選擇器不是 .note-editor 開頭:子選單掛在 body,不在編輯器裡;
+   - 用 data-testid 當掛勾:Astryx 給子選單那一層開放的只有 menuDataTestId,沒有 className / style;
+   - 520px:= slashCommand.tsx 的 MENU_MAX_HEIGHT(選單高度沒有對應的 token),改那裡要一起改這裡。 */
+[role='menu'][data-testid='note-turn-into'] { max-height: min(520px, 60vh); }
+
+/* 縮排(Tab,見 noteExtensions 的 Indent):每層 --spacing-6,最多 8 層 */
+.note-editor-content [data-indent='1'] { margin-inline-start: calc(var(--spacing-6) * 1); }
+.note-editor-content [data-indent='2'] { margin-inline-start: calc(var(--spacing-6) * 2); }
+.note-editor-content [data-indent='3'] { margin-inline-start: calc(var(--spacing-6) * 3); }
+.note-editor-content [data-indent='4'] { margin-inline-start: calc(var(--spacing-6) * 4); }
+.note-editor-content [data-indent='5'] { margin-inline-start: calc(var(--spacing-6) * 5); }
+.note-editor-content [data-indent='6'] { margin-inline-start: calc(var(--spacing-6) * 6); }
+.note-editor-content [data-indent='7'] { margin-inline-start: calc(var(--spacing-6) * 7); }
+.note-editor-content [data-indent='8'] { margin-inline-start: calc(var(--spacing-6) * 8); }
+
+/* 選取整塊(Esc,見 blockSelection.ts):跟清單「選取中」同一個底色;選著的時候藏游標 */
+.note-editor-content .note-block-selected { background: var(--color-overlay-pressed); border-radius: var(--radius-inner); box-shadow: 0 0 0 var(--spacing-1) var(--color-overlay-pressed); }
+.note-editor-content.has-block-selection { caret-color: transparent; }
+
+/* 提及(「@」「[[」,見 nodeViews 的 MentionView):字裡一個淡灰底的小標籤;頁面那一種加底線、可以點 */
+.note-editor-content .note-mention {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-0-5);
+  padding: 0 var(--spacing-1);
+  border-radius: var(--radius-inner);
+  background: var(--color-background-gray);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  vertical-align: baseline;
+}
+.note-editor-content .note-mention[data-kind='page'] {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: var(--color-border-emphasized);
+  text-underline-offset: var(--spacing-0-5);
+}
+.note-editor-content .note-mention[data-selected] { outline: var(--focus-outline-width) var(--focus-outline-style) var(--focus-outline-color); }

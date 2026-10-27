@@ -1,0 +1,7 @@
+# 開發版:跑程式 + 跑 backend/tests。Docker image 只裝 requirements.txt。
+#   .venv/Scripts/pip install -r requirements-dev.txt   (Linux / macOS 用 .venv/bin/pip)
+-r requirements.txt
+# FastAPI 的 TestClient 要用。它常被別的套件順帶裝進來,不明寫的話不保證有。
+httpx==0.28.1
+# tests 全部 import pytest。
+pytest==8.3.3

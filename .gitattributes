@@ -1,0 +1,15 @@
+# Shell script 一律 LF。
+#
+# 在 Windows 上開發、腳本在 Linux(含 Docker 容器)裡跑。CRLF 的 .sh 到了
+# Linux 會變成「set -euo pipefail\r」——  bash 說「pipefail\r 這個選項不存在」,
+# 而那個 \r 還會讓錯誤訊息自己蓋掉自己,看起來像亂碼。
+#
+# 用工具直接寫檔(例如 Python 的 write_text(),Windows 上會把 \n 轉成 \r\n)繞得過
+# 本機的 `bash -n` —— Git Bash 容忍 CRLF,只有真正的 Linux 會炸。
+*.sh text eol=lf
+
+# Markdown 也一律 LF。
+#
+# deploy/workdirs/RULES-web-context.md 會被 COPY 進 Linux 的 image 當成每一題都載入的
+# 規則檔,各專案的 CLAUDE.md 也是模型每一題都讀的檔 —— 不要讓 Windows 的行尾跟著進去。
+*.md text eol=lf

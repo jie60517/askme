@@ -1,0 +1,27 @@
+{
+  "_說明": [
+    "網站要回答哪個專案的問題。複製成 knowledge_bases.json 後改:cp knowledge_bases.example.json knowledge_bases.json",
+    "路徑一律寫**容器裡的路徑**:旁邊的 projects/ 資料夾在容器裡是 /srv/projects。",
+    "欄位的完整說明見開發版的 backend/knowledge_bases.json。改完要 docker compose up -d --force-recreate askme。",
+    "",
+    "workdir       : claude 的工作目錄,那裡的 CLAUDE.md 就是這個專案的作答規則。目錄必須存在",
+    "code_roots    : 原始碼目錄(可以多個)",
+    "knowledge_dirs: 文件目錄(只收目錄)"
+  ],
+  "default": "example",
+  "bases": [
+    {
+      "id": "example",
+      "label": "範例專案",
+      "workdir": "/srv/projects/example",
+      "code_roots": ["/srv/projects/example/src"],
+      "knowledge_dirs": [],
+      "skill_dir": "",
+      "note": "",
+      "suggestions": [
+        "這個專案的整體架構是什麼?主要模組各負責什麼?",
+        "某個功能的主要邏輯是在哪裡處理的?"
+      ]
+    }
+  ]
+}

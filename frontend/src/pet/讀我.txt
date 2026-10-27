@@ -1,0 +1,86 @@
+小夥伴的角色圖說明
+==================
+
+⚠️ 圖不在這個資料夾裡。這裡是 kit 的程式碼(src/pet/),圖在 frontend/public/pet/。
+這份說明跟著程式碼放,是因為要改圖的人會先看到這裡。
+
+要搬到別的專案:frontend/public/pet/ 那 17 張整包複製到你專案的 public/pet/ 底下,
+這個資料夾(.ts / .tsx 加這份說明)複製到你放元件的地方。
+public/ 的東西在 build 時會原封不動複製進 dist/,不用額外設定。
+
+
+目前這 17 張對應哪些狀態
+------------------------
+idle.gif                閒晃      沒事,使用者還在動
+sleeping.gif            打瞌睡    沒事,而且閒置超過 60 秒
+thinking.gif            在想      排隊中 / 剛開始還沒有動作
+carrying.gif            扛東西    正在上傳附件
+idle-reading.gif        看書      正在讀資料
+debugger.gif            放大鏡    正在搜尋
+building.gif            工地帽    正在執行指令
+typing.gif              打字      正在寫回答
+sweeping.gif            打掃      跑超過 5 分鐘了,還在處理
+notification.gif        冒提示    伺服器有提醒
+headphones-groove.gif   戴耳機    同時在跑 2 件
+juggling.gif            拋接      同時跑滿了(滿載)
+bubble.gif              冒對話框  這頁沒事,但別的地方還在跑
+happy.gif               開心      完成了
+error.gif               ERROR     失敗了
+react-annoyed.gif       翻白眼    被按停止 / 被連戳很多下
+react-double-jump.gif   跳兩下    被戳了一下
+
+畫布是 302x300,角色內容大約落在 (50,103)-(243,275) ——
+上面近 1/3 是刻意留白,給終端機視窗、ERROR 字樣、zzz 那些道具用。
+
+
+規格
+----
+格式    GIF / APNG / WebP(會動的)、PNG / SVG(靜態的)
+        會動的格式瀏覽器自己會播,不用寫任何程式
+
+尺寸    內容盡量填滿畫布。這批圖因為留白多,顯示框要開到 144px 才看得清楚
+        (換成滿版的角色時,可以把 PetCompanion 的 size-36 改小)
+
+背景    要透明
+        GIF 的透明邊緣會有鋸齒,講究的話用 APNG 或 WebP
+
+
+不用一次到齊
+------------
+放幾張就生效幾張。還沒放的那個狀態會自動用替代圖示頂著,
+不會變成空白或破圖,可以慢慢補。
+
+檔名打錯也一樣 —— 那個狀態退回替代圖示,不會壞掉。
+
+
+要改檔名或路徑的話
+------------------
+改 src/pet/pet-sprites.ts 裡的 src 欄位,
+或在程式進入點用 configurePet({ spriteOverrides: { ... } }) 覆蓋。
+
+路徑開頭的斜線不能少:"/pet/xxx.gif" 是網站根目錄,不是專案資料夾。
+
+
+換一整組圖之後要重量兩個東西
+----------------------------
+1. 氣泡高度(pet-sprites.ts 的 SPRITE_CONTENT_TOP_PX,一張圖一個值)
+   逐格解碼掃整張 GIF 找內容最高的那一格 —— 不能只看第一格,
+   zzz、跳起來那幾格都在後面。
+
+2. 滑鼠感應區(PetCompanion 裡那四個百分比)
+   量角色實際佔的範圍。整顆框都算的話,滑鼠在角色頭頂上方的空白處
+   就會被當成「移到牠身上」。
+
+詳細作法見 pet-companion-kit/SPEC.md 第 10 節。
+
+
+授權提醒
+--------
+放進來的圖必須是你們有權使用的:自己畫的、自己產的、外包買斷的,
+或明確標示 CC0 / MIT 之類可商用的素材。
+
+網路上的同人素材多半標「All rights reserved」,看起來免費不代表
+可以用在你的系統上。舉例:clawd-on-desk 那個 repo 裡的三隻角色
+(Clawd / Calico / Cloudling)都是 all rights reserved,不能拿。
+
+這批圖不是程式碼的一部分 —— 搬到新專案之前請先確認使用權。

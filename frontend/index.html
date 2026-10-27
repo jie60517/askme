@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!--
+      interactive-widget=resizes-content:Android Chrome 預設是 resizes-visual ——
+      鍵盤只蓋在畫面上、不縮小 100dvh 的殼,底部的輸入框與終端機輸入列會被鍵盤蓋住。
+      iOS 本來就是縮殼的行為,這行讓兩邊一致。
+    -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
+    <!--
+      手機狀態列 / 網址列的底色(沒有這行時深色佈景上面是一條白的)。
+      這裡的兩個色碼只撐 JS 載入前那一下,值抄自 theme-neutral 的 --color-background-body
+      (light-dark(#f1f1f1, #1b1b1b));載入之後 lib/theme.ts 會改成從 token 算出來的那一份。
+      佈景是 data-theme 自己控制、不跟系統走,所以不用 media 分兩條。
+    -->
+    <meta name="theme-color" content="#f1f1f1" />
+    <title>AskME 問我問我!</title>
+    <script>
+      // 在 JS bundle 載入前就套用佈景,否則深色使用者每次重新整理都會先閃一下白底。
+      try {
+        var t = localStorage.getItem('t100_theme');
+        if (t) document.documentElement.setAttribute('data-theme', t);
+        if (t === 'dark') document.querySelector('meta[name="theme-color"]').setAttribute('content', '#1b1b1b');
+      } catch (e) {}
+      // 同一個理由:字級與對比也要在第一次繪製前就到位,不然把字調大的人
+      // 每次重新整理都會看到畫面先用原本的大小畫一次再跳大。
+      // ⚠️ 這段的鍵名與夾值範圍要跟 lib/displayPrefs.ts 一致(兩者都是 50~200)。
+      try {
+        var d = JSON.parse(localStorage.getItem('t100_display_prefs') || '{}');
+        // 明確判 isFinite,不要用 `|| 100`:那條在值是 0 時會靜靜換成 100,
+        // 範圍若改成含 0 就會出錯。
+        // ⚠️ 讀不出數字時兩行都回 **100**(不是 50),要跟 `lib/displayPrefs.ts`
+        // 的 `clamp(..., fallback)` 一致 —— 不一致的話,localStorage 被寫壞的人
+        // 會看到畫面先用一個值畫出來、JS 一載入就跳成另一個。
+        var rawFs = Number(d.fontScale);
+        var fs = Number.isFinite(rawFs) ? Math.max(50, Math.min(200, rawFs)) : 100;
+        var rawCt = Number(d.contrast);
+        var ct = Number.isFinite(rawCt) ? Math.max(50, Math.min(200, rawCt)) : 100;
+        document.documentElement.style.fontSize = fs + '%';
+        // 觸控上的輸入框要墊到 16px(global.css);判斷要跟 lib/displayPrefs.ts 的 apply() 一致
+        if (fs < 100) document.documentElement.setAttribute('data-user-font-small', '');
+        if (ct !== 100) {
+          document.documentElement.style.setProperty('--user-contrast', String(ct / 100));
+          document.documentElement.setAttribute('data-user-contrast', '');
+        }
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

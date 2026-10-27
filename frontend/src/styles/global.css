@@ -1,0 +1,2527 @@
+/* 產品層樣式。顏色/間距/圓角一律用 Astryx token(var(--color-*) / var(--spacing-*)),
+   不要寫死色碼與 px —— 換佈景與深色模式才不會有地方漏掉。 */
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+/*
+ * 最外層不接**垂直**的捲動鏈。
+ *
+ * 聊天訊息區、終端機、檔案欄都是**內層**在捲。捲到頂再往下拉,沒人接的捲動會一路傳到這裡:
+ * Android Chrome 會**下拉重新整理** —— SSH 連線、寫到一半的訊息全部不見;iOS 則是整頁回彈。
+ * `none` 只擋「傳到這一層」,內層自己的回彈照舊。
+ * 內層的 `contain`(下面 `[data-thin-scrollbar]` 那條)管的是另一件事,兩條都要。
+ *
+ * ⚠️ 只擋 `-y`:兩個軸都擋的話,觸控板兩指左右滑的「上一頁 / 下一頁」
+ * 也一起沒了 —— 那是瀏覽器掛在最外層水平 overscroll 上的手勢。
+ */
+html,
+body {
+  overscroll-behavior-y: none;
+}
+
+/*
+ * 手機的基礎款。
+ *
+ * - `touch-action: manipulation`:這些東西不會被雙擊放大,瀏覽器不必等「是不是第二下」,
+ *   點下去的 click 不再延遲(viewport 是 device-width 時多數瀏覽器已經不等,iOS 某些元素還會)。
+ * - 觸控上按鈕的字不給選:長按按鈕時 iOS 會選到按鈕上的字、跳出拷貝選單。
+ *   ⚠️ **只管按鈕,不管連結、更不管 body**:連結常常是內文的一部分(回答裡的網址),
+ *   使用者要能長按拷貝;內文本來就該可以選。
+ */
+button,
+a,
+[role='button'] {
+  touch-action: manipulation;
+}
+/* ⚠️ 只在觸控上:桌機上按鈕裡的字(可點的卡片、帶主機名或 ID 的列)要能拖選拷貝 */
+@media (pointer: coarse) {
+  button,
+  [role='button'] {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+}
+
+/*
+ * iOS 點進字級小於 16px 的輸入框會**放大整頁、而且不縮回來**。
+ *
+ * 設計系統的輸入框在觸控上已經是 `max(1rem, …)`,但 `1rem` 跟著使用者的字級設定走 ——
+ * 調到 100% 以下(個人設定可以到 50%)時 `1rem` 就小於 16px,點任何輸入框(包括聊天輸入框)都會放大。
+ * 所以只在「觸控 + 字級調小了」的時候墊到 16px;`data-user-font-small` 由 `lib/displayPrefs.ts`
+ * 與 `index.html` 的開機腳本掛(兩邊同一條判斷)。
+ * ⚠️ `!important` 是必要的:設計系統用 `:not(#\#)` 把權重堆高了,一般規則壓不過。
+ */
+@media (pointer: coarse) {
+  :root[data-user-font-small]
+    :is(
+      input:not([type='file'], [type='color'], [type='checkbox'], [type='radio'], [type='range']),
+      textarea,
+      [contenteditable='true']
+    ) {
+    font-size: 16px !important;
+  }
+  /*
+   * xterm 叫出鍵盤靠的是一個藏起來的 textarea,而 xterm 會把終端機的字級(14px 左右)
+   * 寫成它的行內樣式 —— 點終端機時 iOS 一樣放大整頁。這個框看不到,墊大不影響畫面;
+   * `!important` 是為了壓過那條行內樣式。
+   */
+  .xterm .xterm-helper-textarea {
+    font-size: 16px !important;
+  }
+}
+
+/*
+ * 疊在誰上面 —— **整站的層級表就這一份**。
+ * ⚠️ 只有這裡是文件,值本身寫在各元件裡:StyleX 的 `zIndex` 只吃數字,
+ * 讀不了自訂屬性,所以改任何一個之前先看這張表:
+ *
+ *    90  載入畫面交棒的那一層(`App.tsx` 的 `BootHandoff`)—— 蓋住還沒畫好的首屏,淡出完就卸掉
+ *    80  截圖存筆記的框選那一層(`RegionPicker.tsx`)—— 凍住的整個畫面,小夥伴、跳轉的光、拖曳幽靈都要在它底下
+ *    60  拖曳幽靈(`sideNavParts.tsx` 的 `sideNavStyles.dragGhost`,主側欄與筆記頁左側清單共用)—— 拿在手上的東西
+ *    50  跳轉的那一圈光(`JumpSpotlight.tsx`)—— 兩秒的指路,壓過內容
+ *    42  對話裡反白之後浮出來的「Save to notes」(`SaveToNotes.tsx` 的 `floating`)—— 跟著選取範圍,
+ *        小夥伴剛好走到那裡也不能蓋住它;筆記編輯器的「/」選單與選字工具列(`notes/NoteEditor.tsx`)同一個理由
+ *    40  小夥伴(pet-companion-kit,`pet-shim.css` 的 `.z-40`)—— 常駐但不擋事
+ *    12  Work Flow 執行紀錄 / 每一步的輸出(`RunPanels.tsx` 的 `RunLog` / `RunOutput`,由 `Workflow.tsx` 的 `RunLogWithTabs` 切換)—— 浮在畫布上
+ *    10  品牌長按彩蛋的畫布(`BrandHold.tsx`,fixed 鋪滿視窗)—— 兩秒的裝飾,不擋事
+ *     5  側邊欄的拖曳把手(`SidebarResizer.tsx`)—— 只要蓋過側邊欄自己的內容
+ *     1  每一列 / 每一個選單項目 —— 墊在會滑的高亮上面(見下面那一段)
+ *     0  那兩塊會滑的高亮(`hover-lift.ts` 的 `highlightStyles.pill`)
+ */
+
+/*
+ * 「滑過去會浮起來」那個效果的兩個值,**唯一的來源**。
+ *
+ * 側邊欄的列、選單的項目、跟著它們跑的兩塊高亮全部讀這裡 ——
+ * 高亮要在量位置時把浮起來的距離補回去(見 components/hover-lift.ts),
+ * 兩邊對不上就會差 2px,而那是最難查的那種偏移。
+ */
+:root {
+  /* 2px。走 token —— 這個檔案開頭就寫著不要寫死 px */
+  --row-float: var(--spacing-0-5);
+  /* 果凍曲線:最後會過衝一點點再收回來 */
+  --row-float-ease: cubic-bezier(0.22, 1.15, 0.36, 1);
+
+  /*
+   * 「往下長出來」那組動作的兩條曲線。**佈景只有一條 easing token**
+   * (`--ease-standard`),而這種手感需要兩條性格不同的:
+   *
+   * - `--ease-panel`(殼 / 高度):起步快、尾巴長長地收住,iOS 面板那條味道。
+   *   ⚠️ 它**不能過衝** —— `grid-template-rows` 的 `fr` 超過 1 會被內容高度夾住,
+   *   過衝等於「卡在頂點」,反而更僵。
+   * - `--ease-overshoot`(內容 / `scale`):**會過衝**,那一下輕微的回彈就是
+   *   「活的」的來源。它安全,因為動的是 `scale` 不是版面。
+   *
+   * 兩個呼叫端:個人設定的 OK / Cancel 那一列(`AccountSettingsDialog`)、
+   * 落地頁分類籤的範例卡(`Chat.tsx` 的 `LandingCategories`)。
+   * 自訂動畫 token 一律住在 `:root`。
+   * ⚠️ **時長不在這裡**(420 / 320 / 260 / 80ms 是各呼叫端自己的字面值)——
+   * 那幾個數字跟佈景的 duration 尺標對不起來,硬套會換掉手感。
+   */
+  --ease-panel: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-overshoot: cubic-bezier(0.34, 1.56, 0.64, 1);
+  /*
+   * SSH 選連線「方框長成終端機」那一段(檔尾「SSH 選連線的過場」):畫面上的移動,慢起慢收。
+   * 卡片 ↔ 方框那一段用上面的 `--ease-panel`。
+   */
+  --ease-morph: cubic-bezier(0.77, 0, 0.175, 1);
+
+  /*
+   * 輸入框**靜止時**的框線,比設計系統預設的明顯。
+   *
+   * 設計系統用的是 `--color-border-emphasized`(淺色佈景 #d4d4d4)——
+   * 那是假設欄位坐在 `--color-background-body`(#f1f1f1)上面。這個站不是:
+   * 登入卡、訊息區都是白的,#d4d4d4 壓在白底上對比只有 1.4:1,
+   * 遠看就像那條線沒有畫完。
+   *
+   * ⚠️ 不要自己挑一個灰色 —— 用 `color-mix` 從兩個 token **算**出來:
+   * 往 `--color-text-primary` 走 35%,淺色佈景會變深、深色佈景會變淺,
+   * 兩邊自動都是「比預設更看得見」。寫死色碼的話只有一邊是對的。
+   *(同一個手法用在資料夾顏色的中間調、對話字級。)
+   */
+  --input-line: color-mix(in oklab, var(--color-border-emphasized), var(--color-text-primary) 35%);
+}
+/*
+ * 兩種情況**不浮**:
+ * - 系統開了「減少動態」—— 減少的是位移,顏色與影子的過場留著(見底下各條的說明)。
+ * - 觸控裝置(沒有 hover、指標是粗的):點一下會觸發假的 `:hover` 而且**黏住**,
+ *   那一列會一直浮著到下一次點擊。手機是這個站的一級介面(抽屜 + MobileNav)。
+ *
+ * ⚠️ 治在**這一個變數**上,不要去各處的 `:hover` 規則加媒體查詢:
+ * 側邊欄的列、`[data-hover-lift]` 的三種宿主、主機卡片、還有 `hover-lift.ts`
+ * 的 `pendingLift`(它從 CSS 讀這個值來補高亮的位置)全部讀這一份 ——
+ * 變數歸零,位移歸零,高亮的補償也自動歸零,三邊不會對不上。
+ */
+@media (prefers-reduced-motion: reduce), not ((hover: hover) and (pointer: fine)) {
+  :root {
+    --row-float: 0px;
+  }
+}
+/*
+ * **側邊欄的列不浮**。浮起 2px 會讓高亮框整塊上移:分隔線上面那列(Search)跟線差 6px、
+ * 下面那列(資料夾)只差 2px,上下留白不對稱 —— 選單項目不浮也是同一個理由(見下面「浮起那 2px」那段)。
+ * Astryx 的 SideNav 滑過不位移,上下都是 4px。
+ * 治在**變數**上:列的 translate 與 `hover-lift.ts` 的 `pendingLift`(高亮框補償)都從
+ * 各自元素讀 `--row-float`,這裡歸零兩邊一起歸零,不會差 2px。滑動的高亮框、粗字、深色圖示照舊;
+ * 側邊欄以外的浮起(輸入框那排、首頁快捷鈕、SSH 主機卡片)不受影響。
+ */
+.astryx-side-nav,
+[data-rail-flyout] {
+  --row-float: 0px;
+}
+
+/*
+ * 捲軸(側邊欄 + 選單/清單)。
+ *
+ * 三件事:
+ * 1. 細的,而且滑桿用 `--color-text-primary`(淺色佈景是近黑、深色佈景自己
+ *    會變成淺色)。`--color-text-disabled` 那種灰在淺底上幾乎看不見。
+ * 2. 軌道透明,讓底下的底色透出來 —— 瀏覽器預設的白色軌道壓在灰底上
+ *    會出現一條很突兀的白帶。
+ * 3. **只有側邊欄**多一條:平常看不到,滑鼠移上去才浮出來(見下一段)。
+ *    選單是暫時開著的,它出現的時候就是要捲的時候,不做這個。
+ *
+ * 掛在 `.astryx-side-nav` 與 `role` 上(公開的 theming hook / ARIA),
+ * 不是 StyleX 產生的類名 —— 那些是編譯出來的,版本一換就對不上。
+ * `scrollbar-width` 會被元件內部的樣式覆寫回 auto,所以子層要用 inherit 拉回來。
+ */
+.astryx-side-nav,
+[role='menu'],
+[role='listbox'] {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-text-primary) transparent;
+}
+.astryx-side-nav *,
+[role='menu'] *,
+[role='listbox'] * {
+  scrollbar-width: inherit;
+  scrollbar-color: inherit;
+}
+
+/* WebKit 舊版(以及部分 Linux 的 Chromium)還不吃 scrollbar-color。
+   粗細走間距 token(--spacing-2 = 8px):設計系統沒有捲軸的 token,
+   但這條「細捲軸」的寬度本來就是一格標準間距。 */
+.astryx-side-nav ::-webkit-scrollbar,
+[role='menu'] ::-webkit-scrollbar,
+[role='listbox'] ::-webkit-scrollbar {
+  width: var(--spacing-2);
+  height: var(--spacing-2);
+}
+.astryx-side-nav ::-webkit-scrollbar-track,
+[role='menu'] ::-webkit-scrollbar-track,
+[role='listbox'] ::-webkit-scrollbar-track {
+  background: transparent;
+}
+.astryx-side-nav ::-webkit-scrollbar-thumb,
+[role='menu'] ::-webkit-scrollbar-thumb,
+[role='listbox'] ::-webkit-scrollbar-thumb {
+  background-color: var(--color-text-primary);
+  border-radius: var(--radius-full);
+}
+
+/* 側邊欄限定:平常整條看不見,滑鼠移上去才浮出來 ——
+   那條軌道一直掛在那裡只是噪音,而人要捲的時候手本來就已經在上面了。 */
+.astryx-side-nav:not(:hover),
+.astryx-side-nav:not(:hover) * {
+  scrollbar-color: transparent transparent;
+}
+.astryx-side-nav:not(:hover) ::-webkit-scrollbar-thumb {
+  background-color: transparent;
+}
+
+/*
+ * 我們自己的可捲面板(@ 選人浮層、分享名單)跟選單、側邊欄同一款捲軸。它們不是 [role=menu]/[role=listbox],
+ * 上面那組選擇器搆不到 —— 掛一個自己的 data 屬性,要這款捲軸的面板自己標。
+ */
+[data-thin-scrollbar] {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-text-primary) transparent;
+}
+/*
+ * 浮層裡的可捲區**捲到底不外溢**(症狀:在右鍵選單的圖示格子裡
+ * 滾滾輪,整個側邊欄跟著捲)。瀏覽器的預設是捲完裡面接著捲外面(scroll
+ * chaining),但選單開著的時候底下那頁根本不該動。
+ *
+ * 🚨 **只掛在捲動容器本身,絕對不要加 ` *` 打到所有後代。**
+ *
+ * `overflow: hidden` 的元素**也是捲動容器**(只是沒有捲軸),contain 對它照樣生效。
+ * 打到後代的話,任何一個 `overflow: hidden` 的後代(例如設計系統選單項目的
+ * description,`overflow-y: hidden`)都變成捲動鏈的**死路**:自己沒東西可捲,
+ * 又不准往上傳,滾輪就消失在那裡 —— @ 選人清單會整個捲不動。
+ * 這種斷法不經過任何 `preventDefault`,往 JS 裡追會追空。
+ *
+ * ⚠️ 「不要外溢到底下那一頁」那件事**不是靠這條 CSS 保證的** ——
+ * `MenuHighlightLayer` 的滾輪守門員才是(它自己的註解就寫著「光靠 CSS 的
+ * overscroll-behavior 不夠,真機上還是漏」)。這條只是給真捲動容器的補強。
+ * 我們自己的可捲面板都掛了 `data-thin-scrollbar`,已經被第一個選擇器蓋到。
+ */
+[data-thin-scrollbar],
+[role='menu'],
+[role='listbox'] {
+  overscroll-behavior: contain;
+}
+
+/*
+ * 圖示挑選器展開時,把**選單面板**的 300px 上限放寬。
+ *
+ * 展開後選單內容超過面板的 StyleX 上限 300px → 面板自己也長出一條垂直捲軸
+ * → 右側被吃掉一條捲軸溝,高亮框填不滿,而且變成裡外兩層捲軸。
+ * 放寬到視窗高以內,整份選單直接放得下,
+ * 捲動只剩圖示格子自己那一層(它有 data-icon-grid,也是這條規則認的記號)。
+ * ContextMenu 是 CSS anchor positioning,靠邊會自己翻面,
+ * 夾住 100dvh 減一圈邊距是給翻了面也放不下的極端情況。
+ */
+[role='menu']:has([data-icon-grid]) {
+  max-height: min(calc(100dvh - var(--spacing-8)), 560px);
+}
+[data-thin-scrollbar]::-webkit-scrollbar {
+  width: var(--spacing-2);
+}
+[data-thin-scrollbar]::-webkit-scrollbar-track {
+  background: transparent;
+}
+[data-thin-scrollbar]::-webkit-scrollbar-thumb {
+  background-color: var(--color-text-primary);
+  border-radius: var(--radius-full);
+}
+
+
+/*
+ * 捲軸出現時不要把內容往內擠。
+ *
+ * 對話一多就長出捲軸,那一瞬間整份清單會往左縮一條捲軸的寬度 ——
+ * 看起來像側邊欄自己變窄了,而使用者什麼都沒做。
+ * `scrollbar-gutter: stable` 是把那條寬度**一直**留著:代價是沒捲軸時
+ * 右邊也空著那幾 px,但畫面不會再跳。跳動比恆定的留白難忍受得多。
+ *
+ * ⚠️ **只能下在真的會捲的那一層**(SideNav 的三個直接子層裡,中間那個
+ * `overflow-y: auto` 的)。寫成 `.astryx-side-nav *` 會打到
+ * `SideNavItem` 收合子項目用的那個 `overflow: hidden` 容器 ——
+ * gutter 對「overflow 不是 visible」的盒子都算數,於是**每一層巢狀**
+ * 都在右邊多留一條捲軸的寬度,子資料夾的收合箭頭一層一層往內縮(一層 10px),
+ * 看起來只像是排版歪掉。
+ */
+.astryx-side-nav:not([data-collapsed]) > div {
+  scrollbar-gutter: stable;
+}
+
+/*
+ * 收起來的 rail(48px 寬)裡不要出現捲軸。
+ *
+ * 那條捲軸在 48px 上佔掉六分之一,而且它旁邊只有一排圖示 —— 看起來像
+ * 一條沒有用的滑桿貼在圖示旁邊。捲動本身還在(滾輪、觸控、鍵盤都照舊),
+ * 只是不畫那條軌道。
+ */
+.astryx-side-nav[data-collapsed],
+.astryx-side-nav[data-collapsed] * {
+  scrollbar-width: none;
+}
+.astryx-side-nav[data-collapsed] ::-webkit-scrollbar {
+  display: none;
+}
+
+/*
+ * 側邊欄裡**每一列之間的距離都要一樣**,收合與展開都是。
+ *
+ * 成因:同一區塊內的列是 2px(清單自己的 gap),但**跨區塊**是 8px ——
+ * `SideNavSection` 上下各有 4px 的內距,資料夾那一區與對話那一區疊在一起就是 8。
+ * 那個落差在設計系統的原意裡是「分組」,但這個側邊欄的分組已經由 Shared /
+ * Personal 各自的圖示與標籤表達了,多出來的空隙只讀得出「這裡沒對齊」。
+ *
+ * 把區塊內距收成列距的一半(相鄰兩塊各出一半 = 2px),整份清單就等距了。
+ * ⚠️ 用 `--spacing-0-5` 算,不要寫 1px:列距本身就是這個 token,
+ * 佈景把間距調大時兩邊要一起變,不然又會分岔。
+ * ⚠️ **只打掛了記號的那兩個清單區塊**(`Sidebar.tsx` 的 `LIST_SECTION`),
+ * 不要改成 `.astryx-side-nav .astryx-side-nav-section` —— 那會連最上面的工具區、
+ * 貼底的帳號區、搜尋結果那兩個**有可見標題**的區塊一起收掉。
+ */
+.astryx-side-nav [data-list-section] {
+  padding-block: calc(var(--spacing-0-5) / 2);
+}
+/*
+ * 但**第一個**清單區塊的上緣貼著工具區底下那條線:只出 1px 的話,線到第一列(Shared 或第一個資料夾)
+ * 只差 1px,而 Search 到那條線是 4px(工具區自己的下內距)—— 線的上下不對稱。
+ * 第一個補成 --spacing-1(4px),跟線上面一樣。
+ * ⚠️ 用 `:nth-child(1 of …)` 不用 `:first-child`:同一層最前面還有一顆 absolute 的滑動高亮,
+ * 而資料夾那一區有資料夾才出現,第一個不一定是誰。
+ */
+.astryx-side-nav [data-list-section]:nth-child(1 of [data-list-section]) {
+  padding-block-start: var(--spacing-1);
+}
+
+/*
+ * 每位同事一個固定的頭像顏色(見 components/avatar-colors.ts)。
+ *
+ * 底色畫在 `Avatar` 的**內層**那顆 `.astryx-avatar-fallback` 上
+ *(設計系統自己的文件說那是公開的 theming 目標),外面下 xstyle 蓋不到它。
+ * 顏色透過自訂屬性從外層繼承進來 —— 沒設的時候走 var() 的預設值,
+ * 也就是設計系統原本那顆灰的,所以沒指定顏色的頭像長相不變。
+ */
+.astryx-avatar-fallback {
+  background-color: var(--avatar-tint, var(--color-neutral));
+  color: var(--avatar-ink, var(--color-text-secondary));
+}
+
+/*
+ * 對話的字要大一級。
+ *
+ * 佈景的 `--font-size-base` 是 **14px**,對一個「一整天在讀答案」的工具太小了。
+ * 字**不是**顏色的問題 —— 提問與回答都是 #171717 壓在近白底上,對比已經是最高的那一階;
+ * 小字讀起來吃力會被當成「對比不夠」。
+ *
+ * ⚠️ 不要去改 `--font-size-base`(那是佈景 token,全站都會跟著變,
+ * 而且專案規定不客製佈景)。
+ *
+ * 值是 base 與 lg 的 **3:1 加權**再減 0.25px(≈14.5px):比 14 大一點點,但不會像另一個字級;
+ * 17px(`--text-large-size`)或兩者中點都太大。
+ * ⚠️ **一律用算的,不要自己挑一個 px**:算出來的值會跟著佈景一起變,
+ * 寫死 15px 的話換佈景就對不上了。同一個手法也用在資料夾顏色的中間調。
+ *
+ * 掛的是設計系統公開的 class(`.astryx-chat-message-bubble` / `.astryx-markdown`),
+ * 不是 StyleX 編譯出來的類名 —— 那些版本一換就對不上。
+ * `ChatMessageBubble` 與 `Markdown` 都**自己指定了** font-size,
+ * 所以不能只設在外層等它繼承,要逐個指名。
+ */
+.astryx-chat-message-list .astryx-chat-message-bubble,
+.astryx-chat-message-list .astryx-markdown,
+.astryx-chat-message-list .astryx-markdown-paragraph,
+.astryx-chat-message-list .astryx-list-item {
+  font-size: calc((var(--font-size-base) * 3 + var(--font-size-lg)) / 4 - 0.25px);
+  line-height: var(--text-large-leading);
+}
+
+/*
+ * 提問底下那排(時間 + 複製 + 修改重問):滑到**那一則訊息**或焦點進來才出現。
+ * 開關要下在 article 的 :hover 上,StyleX 寫不出「父層 hover 改子孫」,
+ * 所以規則放這裡;article 是 ChatMessage 自己的元素,不鉤編譯類名。
+ * 用 opacity 藏不用 display:none —— 鍵盤使用者要 Tab 得到那幾顆鈕。
+ * ⚠️ 這條 `:hover` **刻意不包** `(hover: hover)`:
+ * 觸控裝置沒有 hover,點訊息也不會讓焦點進去 —— 包了之後手機上這排鈕**永遠出不來**。
+ * 點一下觸發的假 :hover 在這裡正是唯一叫得出它們的方式。
+ */
+.astryx-chat-message-list article [data-hover-reveal] {
+  opacity: 0;
+  transition-property: opacity;
+  transition-duration: var(--duration-fast);
+}
+.astryx-chat-message-list article:hover [data-hover-reveal],
+.astryx-chat-message-list article:focus-within [data-hover-reveal] {
+  opacity: 1;
+}
+/*
+ * ⚠️ 這條**不做** reduced-motion 的例外:它只有 opacity,
+ * 沒有位移。「減少動態」是要拿掉會動的東西,不是把無害的淡入也歸零。
+ */
+
+/*
+ * 「滑過去的東西會亮起來」—— 側邊欄的列與選單的項目**同一套**:
+ * 浮起來一點點、字變粗、圖示變深,再配上那塊會滑的高亮
+ *(側邊欄是 `HoverRegion`、選單是 `MenuHighlightLayer`,長相共用
+ *  `components/hover-lift.ts` 的 `highlightStyles.pill`)。
+ *
+ * 一條規則管全部,不是每個元件各掛一份 —— 側邊欄可以按的東西有十幾種
+ *(New chat / Search / 資料夾 / Personal / Shared / 管理員那幾條 / 帳號區),
+ * 選單也有四五種面板;逐個補只會再漏掉下一個。
+ *
+ * 為什麼是這兩件事:設計系統 selected 狀態與平常的差別只有
+ *   - 字重 400 → **500**(`--font-weight-medium`;標籤是繼承來的,設在列上就到得了)
+ *   - 圖示 `--color-text-secondary`(#525252)→ 跟文字一樣的 primary(#171717)
+ * 文字顏色兩種狀態本來就都是 primary,所以「深色」指的是圖示那一半。
+ *
+ * ⚠️ 圖示要**另外指名**:它的顏色是元件自己下在 `<svg>` 上的,設在列上蓋不到。
+ * ⚠️ 用 `translate` 不用 `transform`:SideNav 底下有規則會贏過 transform
+ *(同一組樣式貼在 body 下是 -2px,貼進側邊欄裡就變回 0)。
+ * 也不要用 margin/top —— 那兩個會讓底下每一列重新排版,整份清單跟著抖。
+ * ⚠️ `[data-pinned]`(右鍵選單開在這一列上、或拖曳幽靈裡的複本)也算「滑過去」:
+ * 指標移到選單上時 `:hover` 就沒了,那一列會**掉下來抖一下**,
+ * 而那正是人盯著它的時候。
+ * ⚠️ 選單的焦點用 `:focus` 不是 `:focus-visible` —— 上下鍵是**程式呼叫
+ * `focus()`** 移過去的,那條路徑不保證會被判定成 focus-visible。
+ * ⚠️ 每一列/每一項都要 `position: relative; z-index: 1`,面板要 `position: relative`
+ *(兩者的預設都是 static)。高亮是 positioned 的,而靜態元素一定畫在
+ * positioned 的**下面** —— 不墊高的話高亮會蓋在「New chat」「Sign out」那些字上面
+ *(統一在這裡墊,新加的項目才不會漏);
+ * 面板不設 relative 的話,選單那塊高亮會定位到整個視窗上。
+ *
+ * 距離與曲線是檔案開頭 `:root` 的 `--row-float` / `--row-float-ease`,
+ * 跟著它跑的高亮塊讀同一個值(`hover-lift.ts` 的 `pendingLift`)。
+ */
+[role='menu'],
+[role='listbox'] {
+  position: relative;
+}
+.astryx-side-nav-item,
+[role='menuitem'],
+[role='menuitemcheckbox'],
+[role='menuitemradio'],
+[role='listbox'] [role='option'] {
+  position: relative;
+  z-index: 1;
+  transition-property: translate;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: var(--row-float-ease);
+}
+/*
+ * reduced-motion / 觸控**沒有另外的規則**:`--row-float` 在 `:root` 那條媒體查詢裡
+ * 已經歸零(見檔案開頭),位移的目標是 0,這條 transition 自然沒有東西可動。
+ */
+/*
+ * ⚠️ `:hover` 那一組**另外包在 `(hover: hover) and (pointer: fine)` 裡**:觸控裝置點一下會觸發假的 hover 而且黏住,那一列會一直
+ * 粗體、圖示一直是深色,到下一次點擊為止。鍵盤焦點與 `[data-pinned]` 不分裝置,照舊。
+ */
+.astryx-side-nav-item[data-pinned],
+[role='menuitem']:focus,
+[role='menuitemcheckbox']:focus,
+[role='menuitemradio']:focus,
+[role='listbox'] [role='option']:focus {
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+}
+@media (hover: hover) and (pointer: fine) {
+  .astryx-side-nav-item:hover,
+  [role='menuitem']:hover,
+  [role='menuitemcheckbox']:hover,
+  [role='menuitemradio']:hover,
+  [role='listbox'] [role='option']:hover {
+    font-weight: var(--font-weight-medium);
+    color: var(--color-text-primary);
+  }
+}
+/*
+ * 浮起那 2px **只給側邊欄的列,選單項目不浮**。
+ * 選單裡浮起會讓高亮塊整個上移 2px:第一項幾乎頂到面板上緣(剩 2px)、
+ * 最後一項下面卻留 6px,上下不對稱。
+ * 不浮的話 pendingLift 讀到的目標位移是 0,高亮正好罩住那一項,
+ * 上下的留白回到面板自己的 4px 內距,對稱。
+ *(觸控與 reduced-motion 下 `--row-float` 是 0,這條自然不動,不必再包。)
+ */
+.astryx-side-nav-item:hover,
+.astryx-side-nav-item[data-pinned] {
+  translate: 0 calc(var(--row-float) * -1);
+}
+.astryx-side-nav-item[data-pinned] svg,
+[role='menuitem']:focus svg,
+[role='listbox'] [role='option']:focus svg {
+  color: var(--color-text-primary);
+}
+@media (hover: hover) and (pointer: fine) {
+  .astryx-side-nav-item:hover svg,
+  [role='menuitem']:hover svg,
+  [role='listbox'] [role='option']:hover svg {
+    color: var(--color-text-primary);
+  }
+}
+
+/*
+ * 選單裡**每一列的高亮都交給那塊會滑的**(`MenuHighlightLayer`),
+ * 子選單的觸發列也是 —— 設計系統自己給觸發列上的 hover / focus 底色
+ * 在這裡整個關掉。
+ *
+ * ⚠️ 不能讓觸發列交給設計系統、葉子交給高亮塊 —— 兩塊底**寬度不一樣**:
+ * 設計系統的底畫在項目自己身上(面板內距以內),高亮塊鋪滿整個面板(滿版),
+ * 一眼就看出兩種寬。統一成滿版那種。
+ *
+ * 「展開中的路徑」(指標已經移進子選單,父層那條還亮著)設計系統
+ * 也是用同一塊底標的 —— 高亮塊全站只有一塊、跟著指標走,標不了路徑,
+ * 所以那一態改用底下的 ::before 自己畫一塊**同寬同色**的(見下一段)。
+ */
+[role='menu'] [role='menuitem'][aria-expanded] {
+  background-color: transparent;
+}
+/*
+ * 葉子也一樣:**指標移上去時設計系統會把焦點移到那一項**,再給 `:focus` 一層底色
+ *(`--color-overlay-hover`,畫在項目自己身上、面板內距以內)—— 跟滿版的高亮塊疊成兩層框。
+ * ⚠️ **只有正式 build 看得到**:開發版的樣式順序剛好讓它輸給別條,dev server 上量不到;
+ * 驗這條要對著 build。
+ * `@` / `/` 那種清單的選項也交給同一塊高亮,但**只關滑過、而且沒被選中的**:
+ * listbox 不只浮層,頁面裡也有(SSH 檔案欄的每一列是 `role=option`,選中靠底色)——
+ * 連 `:focus` 或選中的一起關的話,點一下那一列就失去選中底色。
+ */
+[role='menu'] :is([role='menuitem'], [role='menuitemcheckbox'], [role='menuitemradio']):is(:hover, :focus, :focus-visible),
+[role='listbox'] [role='option']:not([aria-selected='true']):hover {
+  background-color: transparent;
+}
+/*
+ * 展開中的觸發列:一塊跟高亮塊**同寬、同色、同圓角**的底,讓「現在開的是
+ * 哪一條路」看得見,而且跟滑過去那塊長一模一樣。
+ *
+ * 寬度用 inset-inline 的**負值**往外撐到面板內距之外(高亮塊是
+ * `insetInline: 0` 貼著面板,面板內距是 --spacing-1);
+ * 項目自己是 `position: relative; z-index: 1`(上面那段),::before 給
+ * z-index -1 就墊在文字下面、蓋在面板底色上。
+ * 只認 aria-expanded **= 'true'**:沒展開的觸發列不上底(hover 由高亮塊管)。
+ *
+ * `.menu-item-current` 是**目前選中的那一項**(打勾那個;Chat.tsx 的專案選單標的):
+ * 除了打勾,再給一塊跟高亮塊同樣的底,一眼看得出現在選的是哪個專案。
+ * 用 class 不用 data-* 是因為 DropdownMenuItem 只開 className 這個通道。
+ */
+[role='menu'] [role='menuitem'][aria-expanded='true']::before,
+[role='menu'] [role='menuitem'].menu-item-current::before {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  inset-inline: calc(var(--spacing-1) * -1);
+  z-index: -1;
+  border-radius: var(--radius-element);
+  background-color: var(--color-overlay-hover);
+}
+
+/*
+ * 「滑過去浮起一塊」的**第三個宿主**(檔案區的檔名與
+ * 問題、輸入框那排圖示鈕、空白頁的範例卡)。
+ *
+ * 側邊欄與選單用的是一塊**會滑**的高亮(`hover-lift.ts`)—— 那是因為它們是
+ * 一列接一列的清單,滑動才講得出「同一個東西跟著你走」。這裡的東西是散開的
+ * 按鈕與卡片,沒有「上一個」可以滑,所以效果直接下在元素自己身上。
+ * ⚠️ 顏色、圓角、影子、位移、曲線**全部讀跟那兩塊同一組 token** ——
+ * 各挑一組的話,同一個站上會出現兩種手感(這正是 hover-lift.ts 開頭在講的事)。
+ *
+ * 兩種:
+ * - `pill` —— 底是透明的東西(圖示鈕、表格裡的一格):連底色與圓角一起給。
+ * - 沒有值 —— 本來就有自己那一面(`ClickableCard`):只給浮起與影子,
+ *   底色與圓角是它自己的,蓋掉會變成另一張卡。
+ */
+/*
+ * ⚠️ **`box-shadow` 留在補間清單裡是量過的,不要拿掉。**
+ *
+ * `box-shadow` 不是可合成的屬性,補間期間每一格都要重繪;但強制十幾個宿主同時補間、
+ * 逐幀取樣對照,有無 box-shadow 的掉幀率差距小於組內變異,也沒有任何一幀超過 50ms。
+ * 拿掉它省不到可觀測的東西,卻會讓影子「啪」一下出現。要再質疑就照這個方法重量,不要用猜的。
+ */
+/*
+ * ⚠️ **rail 浮層裡的對話列也是 `pill` 宿主,但它沒有 `data-hover-lift` 屬性。**
+ *
+ * 不能做成 `ConversationRow` 在 rail 時才掛的 prop:prop 得跟著
+ * `isCollapsed` 翻,會讓每一列的 `memo` 在**每一次**收合/展開都失效一次,
+ * 同步重算正好擋在動畫的第一幀前面(見 Sidebar.tsx `RowProps` 上面那段)。
+ * 所以從這裡認 `[data-rail-flyout]`(`Sidebar` 收合時才掛的記號):同一份定義、同一個樣子,
+ * 但 React 那邊一個會翻的 prop 都不剩。
+ *
+ * ⚠️ 認的是**我們自己掛的 `data-rail-flyout`**(`Sidebar.tsx` 的兩個清單容器,
+ * 只在收合時掛),不是設計系統的 `.astryx-popover-surface` —— 後者是它的內部結構,
+ * 升版會靜靜失效。範圍也必須這麼窄:rail 的工具列(New chat / Search / 帳號那排)
+ * 同樣是 `.astryx-side-nav-item`,打到的話會整排多出一層漂浮框。
+ */
+[data-hover-lift],
+[data-rail-flyout] .astryx-side-nav-item {
+  transition-property: translate, background-color, box-shadow;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: var(--row-float-ease);
+}
+/*
+ * ⚠️ 鍵盤那條認 `:focus-visible` / `:has(:focus-visible)`,**不能用 `:focus-within`**
+ * :滑鼠點過的按鈕焦點會留在它身上,`:focus-within`
+ * 對「自己有焦點」也成立 —— 點完 Files、點完版本下拉,指標都移開了那塊還浮著。
+ * `:focus-visible` 只認鍵盤帶進來的焦點,滑鼠點完不算;容器形(檔案區的
+ * 檔名格)用 `:has(:focus-visible)` 拿到同一個語意。
+ */
+/*
+ * ⚠️ `:hover` 那一半**另外包在 `(hover: hover) and (pointer: fine)` 裡**:
+ * 觸控裝置點一下會觸發假的 hover 而且黏住,影子與底色會一直留著到下一次點擊。
+ * 位移那一半不必包 —— `--row-float` 在觸控上已經歸零(檔案開頭)。
+ * 鍵盤焦點與 `aria-expanded` 不分裝置,照舊。
+ */
+[data-hover-lift]:focus-visible,
+[data-hover-lift]:has(:focus-visible),
+[data-hover-lift][aria-expanded='true'] {
+  box-shadow: var(--shadow-low);
+  translate: 0 calc(var(--row-float) * -1);
+}
+/*
+ * rail 浮層那幾列只借**影子**,位移不借 —— 那 2px 上面
+ * `.astryx-side-nav-item:hover` 已經給過了(它打的是所有的列,浮層裡的也算)。
+ * 跟著寫就是把同一個位移宣告兩次。
+ */
+[data-rail-flyout] .astryx-side-nav-item:focus-visible,
+[data-rail-flyout] .astryx-side-nav-item:has(:focus-visible) {
+  box-shadow: var(--shadow-low);
+}
+@media (hover: hover) and (pointer: fine) {
+  [data-hover-lift]:hover {
+    box-shadow: var(--shadow-low);
+    translate: 0 calc(var(--row-float) * -1);
+  }
+  /* 同上:影子借,位移不借 */
+  [data-rail-flyout] .astryx-side-nav-item:hover {
+    box-shadow: var(--shadow-low);
+  }
+}
+/*
+ * 卡片形(沒有值的那種,範例卡)影子升一階。shadow-low 在 32px 高的圖示鈕上看得見,鋪在 280px 寬的
+ * 卡片上幾乎讀不出來 —— 面積越大要浮起來就要越大的影子。仍是同一個
+ * token 尺標,只是取上一階;浮起距離與曲線跟其他宿主完全一致。
+ */
+[data-hover-lift='']:has(:focus-visible) {
+  box-shadow: var(--shadow-med);
+}
+@media (hover: hover) and (pointer: fine) {
+  [data-hover-lift='']:hover {
+    box-shadow: var(--shadow-med);
+  }
+}
+[data-hover-lift='pill'],
+[data-rail-flyout] .astryx-side-nav-item {
+  border-radius: var(--radius-element);
+}
+/*
+ * `aria-expanded='true'` 也算:選單開著的時候觸發鈕要一直浮著。
+ * 選單一開、指標移進面板裡,:hover 就沒了,鈕會掉回去;開著的狀態
+ * DropdownMenu 自己標在觸發鈕的 aria-expanded 上,拿它接手。
+ */
+[data-hover-lift='pill']:focus-visible,
+[data-hover-lift='pill']:has(:focus-visible),
+[data-hover-lift='pill'][aria-expanded='true'],
+[data-rail-flyout] .astryx-side-nav-item:focus-visible,
+[data-rail-flyout] .astryx-side-nav-item:has(:focus-visible) {
+  background-color: var(--color-overlay-hover);
+}
+@media (hover: hover) and (pointer: fine) {
+  [data-hover-lift='pill']:hover,
+  [data-rail-flyout] .astryx-side-nav-item:hover {
+    background-color: var(--color-overlay-hover);
+  }
+}
+/*
+ * 分類籤(Research / Writing / Coding / Creative)的浮起**要看得出來**。
+ *
+ * 一般的 `[data-hover-lift]` 套在這幾顆上**讀不出來**:
+ *  - `--shadow-low` 是給 32px 見方的圖示鈕用的,鋪在 110×36 的籤上幾乎看不見
+ *    (跟範例卡同一個道理:面積越大就要越大的影子);
+ *  - 而它的底色 `--color-overlay-hover` 跟設計系統 ghost 按鈕自己的 hover 底
+ *    **是同一個值**,疊上去等於沒疊 —— 「有沒有掛」在畫面上分不出來。
+ * 所以這幾顆升一階影子、底色再壓一階(pressed 那一階,仍是設計系統的 token,
+ * 不自己配色)。位移與曲線照舊跟其他宿主同一份。
+ */
+[data-landing-chip]:focus-visible,
+[data-landing-chip]:has(:focus-visible) {
+  box-shadow: var(--shadow-med);
+  background-color: var(--color-overlay-pressed);
+}
+@media (hover: hover) and (pointer: fine) {
+  [data-landing-chip]:hover {
+    box-shadow: var(--shadow-med);
+    background-color: var(--color-overlay-pressed);
+  }
+}
+/*
+ * reduced-motion 下 `[data-hover-lift]` 的 transition **留著**:動的是底色與影子
+ * (位移已經由 `--row-float` 歸零)。把時間壓到 0 等於連顏色的淡入
+ * 也砍掉 —— 「減少動態」要的是不要位移,不是不要過場。
+ */
+
+/*
+ * 「按下去會縮一點」的共用詞彙,跟上面的 `[data-hover-lift]` 平行:
+ * hover 那一層治在 `--row-float`,按壓這一層治在這裡。
+ *
+ * ⚠️ **幅度是 `.98`。** 設計系統自己的按鈕就是
+ * `:active { transform: scale(0.98) }`(`Button/Button.tsx`,`Selector` /
+ * `MultiSelector` / `ComplexSelector` 三個元件各重寫一次同一個值)。
+ * 這個記號存在的**唯一理由**就是讓「繞過 `<Button>` 的那幾顆」跟真的 `<Button>`
+ * 按起來一樣 —— 差 0.01 的話,同一排裡有的縮 2% 有的縮 3%。
+ *
+ * ⚠️ 用 `scale` 不用 `transform: scale(...)`:上面那條規矩(位移一律走
+ * `translate` / `scale` 的個別屬性)在這裡是**必要**不是風格 ——
+ * `HostStage` 的節點靠 `translate: -50% -50%` 定位,寫 `transform` 會把那個定位
+ * 整個蓋掉,節點會從圓心跳到左上角。個別屬性各自 transition、互不干擾
+ *(設計系統的 `Lightbox.tsx` 也是同樣的做法)。
+ *
+ * ⚠️ **不做觸控閘門。** `--row-float` 要包 `(hover: hover)` 是因為觸控會發假的
+ * `:hover` 而且黏住;`:active` 沒有這個毛病 —— 手指離開就結束,而且觸控正是最需要
+ * 按壓回饋的場合(沒有 hover 可以預告)。
+ */
+/*
+ * ⚠️ **`scale: 1` 這一行不能省**。
+ * 不寫的話這幾顆的 computed `scale` 起始值是 `none`,而 `none` → `0.98` 這段補間
+ * 在**同時掛著 `translate` 的元素**上(`HostStage` 的節點是 `translate: -50% -50%`)
+ * 建不起來,而且會把整個 `scale` 值吞掉 —— 連 `scale: 0.98 !important`
+ * 都壓不出效果。要有明確的起點才會生效。
+ */
+[data-pressable] {
+  scale: 1;
+  transition-property: scale;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: var(--ease-standard);
+}
+[data-pressable]:active {
+  scale: 0.98;
+}
+
+/*
+ * 兩個記號掛在同一顆上時要**把過場列在一起**(目前只有 `FilesDialog` 的 From 那一格)。
+ * 兩條規則的特異性都是 (0,1,0),後面那條的 `transition-property` 會整個蓋掉前面那條 ——
+ * 不補這條的話,浮起來那 2px 會變成瞬移。特異性 (0,2,0) 壓過兩邊。
+ * 曲線取 `--row-float-ease`(果凍那條):這顆的主要動作是浮起,而 2% 的縮放上
+ * 那點過衝算出來不到半個像素,看不出來。**不要為此引入第三條 cubic-bezier。**
+ */
+[data-hover-lift][data-pressable] {
+  transition-property: translate, scale, background-color, box-shadow;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: var(--row-float-ease);
+}
+
+
+/*
+ * reduced-motion:**保留按壓狀態,只拿掉補間**(`transition-duration: 0s`)。
+ *
+ * ⚠️ 這裡刻意**不照 `--row-float` 那招歸零**。理由:`--row-float` 歸零之後,hover
+ * 的回饋還剩底色與影子兩個管道;而按壓這裡縮放是**唯一**的管道,歸零等於「開了
+ * 減少動態就沒有任何按壓回饋」—— reduced motion 是更少更輕,不是零。
+ * 而且設計系統的 `<Button>` 就是這樣做的(`transitionDuration` 在 reduced-motion 下
+ * 是 `'0s'`,`scale(0.98)` 照舊)—— 這個記號存在的理由就是跟它一致,
+ * 連 reduced-motion 下的行為都要一致。
+ */
+@media (prefers-reduced-motion: reduce) {
+  [data-pressable] {
+    transition-duration: 0s;
+  }
+  /*
+   * ⚠️ 兩個記號都掛的那一顆(目前是 `FilesDialog` 的 From 格)**只能讓 `scale` 不補間,
+   * 其餘要留著**。整條 `transition-duration: 0s` 會違反上面那段(「reduced-motion 下
+   * `[data-hover-lift]` 的 transition 留著」),連底色與影子的淡入也砍掉。
+   * 位移本來就由 `--row-float` 歸零,這裡要拿掉的只有按壓那 2% 的補間。
+   */
+  [data-hover-lift][data-pressable] {
+    transition:
+      scale 0s,
+      translate var(--duration-fast) var(--row-float-ease),
+      background-color var(--duration-fast) var(--row-float-ease),
+      box-shadow var(--duration-fast) var(--row-float-ease);
+  }
+}
+
+/*
+ * 選單彈出來的 **morph**(配方取自 godui 的 multi-button)。
+ *
+ * 三件事一起做完:縮放、淡入、去模糊、往下落一點。
+ *
+ * ⚠️ **從哪個角長出來、往哪個方向落,看選單實際開在觸發點的哪一邊**。
+ * 固定左上角的話,往上翻的右鍵選單會明顯從左上角長、還往下掉。
+ * 設計系統用 CSS anchor positioning + position-try-fallbacks 翻面,**沒有對外標記翻到哪一邊**,
+ * 所以由 `MenuHighlightLayer` 在選單打開(`beforetoggle`)之後、第一幀畫出來之前比對面板與它的
+ * anchor 的位置,寫三個變數到 `[role=menu]` 上:
+ *   `--menu-origin-y`(top / bottom)、`--menu-origin-x`(left / right)、`--menu-drop`(-1 從上面落下 / 1 從下面浮上)。
+ * 量不到(沒有 anchor、不支援 Popover API)就用下面的預設值:左上角往下落。
+ * ⚠️ 三個變數註冊成**不繼承**(下面的 `@property`):子選單的 `[role=menu]` 在父選單的 DOM 裡面,
+ * 自己量不到的時候不能撿父選單的方向來用,要回到預設值。
+ *
+ * 這條**同時管兩種選單**:「⋯」的 DropdownMenu 與右鍵的 ContextMenu
+ * 畫出來的都是 `[role=menu]`,一條規則兩邊都有(認 role,不要一個一個包)。
+ */
+@property --menu-origin-x {
+  syntax: '*';
+  inherits: false;
+}
+@property --menu-origin-y {
+  syntax: '*';
+  inherits: false;
+}
+@property --menu-drop {
+  syntax: '*';
+  inherits: false;
+}
+@keyframes menu-morph-in {
+  from {
+    opacity: 0;
+    scale: 0.7;
+    translate: 0 calc(var(--spacing-3) * var(--menu-drop, -1));
+    filter: blur(12px);
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+    translate: 0 0;
+    filter: blur(0);
+  }
+}
+[role='menu'] {
+  transform-origin: var(--menu-origin-y, top) var(--menu-origin-x, left);
+  /*
+   * 幅度與時間:
+   *   - scale **0.7**(不要更小:套到整塊面板會變成「從一個點炸開」,是暴衝不是順暢)
+   *   - blur **12px**(去模糊是這個效果最看得見的一半)
+   *   - 下墜 **12px**,面板才像「長出來」而不是「原地放大」
+   *   - 時間 **`--duration-medium`**(實際 300ms):時間不夠長的話,再大的幅度也只是「閃一下」。
+   *
+   * ⚠️ morph 進行中 rect 是縮小的 —— 高亮塊要量 offset*,見 MenuHighlightLayer。
+   *
+   * ⚠️ 讀 token 的實際值要**在瀏覽器裡量**,不要看 `@astryxdesign/core` 的
+   * astryx.css —— `theme-neutral` 整組覆寫掉了,兩邊差很多:
+   *     core: fast-max 230 / medium-min 310 / medium 410
+   *     實際: fast-max **165** / medium-min **225** / medium **300** / medium-max **400**
+   * `medium-min`(225ms)效果看不出來;`medium-max`(400ms)選單就從「順暢」變成「慢」。
+   * 下拉選單的預算是 150–250ms,300 已經是為了幅度讓步的上限,**不要再往上調**。
+   * 真要更明顯,調幅度不要調時間。
+   */
+  animation: menu-morph-in var(--duration-medium) var(--ease-standard);
+}
+/*
+ * reduce 下**只淡入**,`--duration-fast`。跟本檔其他地方一樣「更少更輕,不是歸零」:
+ * 縮放、下墜、模糊是位移類的,拿掉;淡入是「這個東西出現了」,留著。
+ */
+@keyframes menu-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  [role='menu'] {
+    animation: menu-fade-in var(--duration-fast) var(--ease-standard);
+  }
+}
+
+/*
+ * 側邊欄那幾個選單的**第一項與最後一項貼齊面板的上下緣**。
+ *
+ * 面板自己有 4px 內距(設計系統的 `--_dropdown-menu-padding`),
+ * 光把 `^` / `v` 那兩顆用負邊距推進去不夠 —— 那兩顆是**條件出現**的
+ * (到頂不畫 `^`、到底不畫 `v`),所以最上面的資料夾少了 `^`、
+ * 最下面的對話少了 `v` 時,那一頭就變成沒貼齊,同一個選單看起來兩種樣子。
+ *
+ * 所以認**位置**不認是哪一顆:誰排第一誰貼上緣、誰排最後誰貼下緣。
+ * 走 CSS 是因為 StyleX 沒有子選擇器,而「第一個/最後一個是誰」只有排版時才知道。
+ */
+[data-menu-flush] > :first-child {
+  margin-block-start: calc(var(--spacing-1) * -1);
+}
+[data-menu-flush] > :last-child {
+  margin-block-end: calc(var(--spacing-1) * -1);
+}
+
+/*
+ * 文字輸入欄位的框線(見 `:root` 的 `--input-line`)。
+ *
+ * ⚠️ **只管靜止狀態**:聚焦(`:focus-within`)交給設計系統的 accent 框,
+ * 有狀態的(`data-status`,錯誤/成功)與 disabled 也不能蓋 ——
+ * 那幾個的顏色本身就是訊息。
+ */
+.astryx-text-input:not(:focus-within):not([data-status]):not([data-disabled]) {
+  border-color: var(--input-line);
+}
+
+/*
+ * 聚焦時的框線 —— **聚焦一定要比靜止時更明顯**。
+ *
+ * 設計系統預設的聚焦是「框線換成 accent + 一圈 2px 的 **inset** 光暈」,
+ * 那一圈畫在框線內側,跟圓角永遠對不齊;而直接拿掉光暈的話,
+ * 聚焦反而比 hover 弱,看起來就像「一點就沒了」。
+ *
+ * 所以改成**往外**擴一圈 `--border-width` 的 accent:
+ * 外擴的 box-shadow 是照 border-box 的圓角描出來的,不會有 inset 那個
+ * 「內圈圓角對不上外圈」的問題,而視覺上等於把框線加粗成兩倍。
+ * 靜止 = 一條 `--input-line`,hover = 一圈很淡的內光暈,聚焦 = 兩倍粗的近黑 ——
+ * 三段由弱到強。
+ *
+ * 有狀態的(`data-status`)不套:那時候框線的顏色本身就是訊息。
+ */
+.astryx-text-input:focus-within:not([data-status]) {
+  box-shadow: 0 0 0 var(--border-width) var(--color-accent);
+}
+
+/*
+ * 上面那圈外擴的聚焦框,會讓欄位**看起來**左右各寬出一格框線 —— 而底下「從欄位長出來」的
+ * 訊息框(components/FieldMessage.tsx,例如登入頁的 Caps Lock 提示)是照欄位本身的寬畫的,
+ * 聚焦那一刻就變成兩側各縮進去一圈。
+ * 聚焦而且沒有狀態時(= 那圈外框在的時候)訊息框跟著往外多一格。有錯誤狀態的欄位不畫外擴,
+ * 本來就對齊,不套。
+ */
+[data-has-field-message]:has(.astryx-text-input:focus-within:not([data-status])) > [data-field-message] {
+  margin-inline: calc(-1 * var(--border-width));
+}
+
+/*
+ * 錯誤用 FieldMessage(左邊自帶 ⓧ)的欄位,**欄內設計系統自己那顆錯誤圖示不畫** —— 不然一格兩顆 ⓧ。
+ * 外層掛 data-has-field-message 的才算:`FieldWithMessage` 自己會掛(components/FieldMessage.tsx),
+ * 登入頁那兩格自己組、自己掛。別的欄位的狀態圖示照舊。
+ * ⚠️ Selector 的狀態圖示是**取代**下拉箭頭畫的,藏掉之後出錯那段時間沒有箭頭 —— 改選就清掉錯誤、箭頭回來。
+ * FieldMessage 自己那顆是 `color="inherit"`,不會被這條選到。認 `data-color`,不認棄用的 bare class `.error`。
+ */
+[data-has-field-message] .astryx-icon[data-color='error'] {
+  display: none;
+}
+
+
+/*
+ * 拖曳幽靈裡的那一列複本。
+ *
+ * 它掛著 `data-pinned`(借用「看起來像被滑到」那組:字變粗、圖示變深),
+ * 但**位移那 2px 要取消** —— 外面那一塊底就是浮起來的框本身,
+ * 裡面再往上浮一次,底跟字會差 2px。
+ */
+[data-drag-ghost] .astryx-side-nav-item {
+  translate: none;
+}
+
+/*
+ * 輸入框那一排選項鈕(@ / 附件 / Files / 模型 / 錄音)與
+ * 打進去的字的顏色 —— **一律跟側邊欄的列照同一套 token**。
+ *
+ * ⚠️ 側邊欄那一列是**兩態**:靜止「字 `--color-text-primary` + **圖示
+ * `--color-icon-secondary`**」,滑過去「圖示變 primary + 字變粗(medium)」。
+ * 這裡逐項照抄(上面 .astryx-side-nav-item 那一段),連字重那一階都一樣。
+ * 整顆壓成 secondary 會比側邊欄的字淡一階;整顆壓成 primary 則圖示比側邊欄深、
+ * 滑過去又沒有任何變化。用的是同一個 token,不是同一個色碼。
+ *
+ * ⚠️ 這條**同時管輸入框底下那四顆分類籤**(Research / Writing / Coding /
+ * Creative,`Chat.tsx` 的 `LANDING_CHIP`)—— 兩處各挑一次 token 就會漂成兩種顏色。
+ *
+ * ⚠️ 錄音鈕(`ChatDictationButton`)的記號掛在它的外層 `<span>` 上
+ *(它的 props 透傳到根節點)。**錄音中的等化器長條不受影響** —— 那幾根是
+ * `<span>` + inline `background-color`(accent 色),不是 `svg`,也不吃文字色。
+ * ⚠️ 佔位字(placeholder)不在這條裡:它已經是 `--color-text-secondary`,
+ * 而把「還沒打字的提示」畫得跟真的內容一樣深會讓人以為裡面已經有字了。
+ */
+[data-composer-action],
+[data-landing-chip] {
+  color: var(--color-text-primary);
+  /*
+   * ⚠️ 靜止的字重要**壓回 400**:設計系統的 Button(ghost)自己是 500,
+   * 而側邊欄的列平常是 400、滑過去才 500 —— 不壓的話這排永遠是「已經滑過去」
+   * 的字重,滑過去也就看不出「變粗」那一下。
+   */
+  font-weight: var(--font-weight-normal);
+}
+[data-composer-action] svg,
+[data-landing-chip] svg {
+  color: var(--color-icon-secondary);
+}
+[data-composer-action]:focus-visible,
+[data-composer-action]:has(:focus-visible),
+[data-composer-action][aria-expanded='true'],
+[data-landing-chip]:focus-visible,
+[data-landing-chip]:has(:focus-visible) {
+  font-weight: var(--font-weight-medium);
+}
+[data-composer-action]:focus-visible svg,
+[data-composer-action]:has(:focus-visible) svg,
+[data-composer-action][aria-expanded='true'] svg,
+[data-landing-chip]:focus-visible svg,
+[data-landing-chip]:has(:focus-visible) svg {
+  color: var(--color-text-primary);
+}
+/*
+ * `:hover` 那一半只給有滑鼠的裝置:
+ * 手機點一下會觸發假的 `:hover` 而且黏住,那顆鈕就一直是「滑過去」的粗字 + 深色圖示。
+ * 條件跟 `lib/media.ts` 的 `HOVER_QUERY` 一樣。鍵盤焦點那幾條留在上面,不受影響。
+ */
+@media (hover: hover) and (pointer: fine) {
+  [data-composer-action]:hover,
+  [data-landing-chip]:hover {
+    font-weight: var(--font-weight-medium);
+  }
+  [data-composer-action]:hover svg,
+  [data-landing-chip]:hover svg {
+    color: var(--color-text-primary);
+  }
+}
+
+/*
+ * 輸入框**打進去的字**跟那排鈕同一個 token —— 各挑一個就會出現兩種顏色。
+ * @ 與 / 的 token、貼上的檔案籤有自己的顏色,不受這條影響
+ *(它們的顏色下在 token 元素自己身上)。
+ */
+[data-composer-mode] [contenteditable='true'] {
+  color: var(--color-text-primary);
+}
+
+/*
+ * 「從檔案區跳到這一則」的落點:**上面要留一點空**,看得到一點前文。
+ *
+ * `scrollIntoView({block: 'start'})` 會把目標貼齊捲動容器的上緣,那一則
+ * 上面連一行前文都看不到。`scroll-margin-block-start` 是瀏覽器**在算落點時**
+ * 就一起算進去的,所以它跟串流的黏底補間(useChatStreamScroll)不會搶
+ * scrollTop —— 在 JS 裡多捲一段就會搶(見 Chat.tsx 的 JUMP_ANCHOR)。
+ *
+ * 這個值同時也是彩虹框的呼吸空間:框往外站 14px(JumpSpotlight 的
+ * RING_OFFSET_PX,兩處要一起看)、柔光再暈開十幾px,
+ * 貼齊上緣的話那一圈的上半會被容器切掉。
+ * 記號由 `Chat.tsx` 的 `JUMP_ANCHOR` 掛上(提問 / 答案 / 便條三種落點共用一份)。
+ */
+[data-jump-anchor] {
+  /* 尺標到 --spacing-12(48px)為止,更大的照 App.tsx 的慣例用 calc 組
+     —— 不要寫 96px(所有值都走 token,不寫死 px) */
+  scroll-margin-block-start: calc(var(--spacing-12) * 2);
+}
+
+/*
+ * 手機版展開鈕上的「還在跑」小點。
+ *
+ * 手機上側邊欄是收起來的,問答跑到一半切走之後畫面上沒有任何地方看得出來主機還在算
+ * —— 那顆鈕是唯一一直看得到的東西。`data-running` 由 `RunningNavDot` 直接掛在
+ * 那顆鈕上(我們自己的 MenuToggle,見 RunningNavDot 的註解)。
+ *
+ * 樣子照 `<StatusDot variant="accent" isPulsing>`(側邊欄「回答中」那顆就是它):主題色、
+ * 2 秒一次、只變透明度。「還在跑」不是錯誤,所以不用 `--color-error`。
+ */
+[data-running] {
+  position: relative;
+}
+
+[data-running]::after {
+  content: '';
+  position: absolute;
+  inset-block-start: var(--spacing-1);
+  inset-inline-end: var(--spacing-1);
+  inline-size: var(--spacing-2);
+  block-size: var(--spacing-2);
+  border-radius: var(--radius-full);
+  background-color: var(--color-accent);
+  animation: t100-pulse 2s ease-in-out infinite;
+}
+
+/* StatusDot 的 pulse(1 → .5 → 1),逐字照抄 */
+@keyframes t100-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-running]::after {
+    animation: none;
+  }
+}
+
+/*
+ * 側邊欄的字級:佈景的 14px 再大 0.25px。
+ *
+ * 清單掃起來輕鬆一點,又不會跟內文搶。
+ *
+ * ⚠️ 只動**列的標籤**那一層(`SideNavItem` 自己指定了 font-size,
+ * 設在外層等它繼承是蓋不掉的),不要下在 `.astryx-side-nav *` 上
+ * —— 那會連捲軸預留、收合容器一起算進去(同上面 scrollbar-gutter 那個坑)。
+ * ⚠️ 一律**相對**佈景的 base 算,不是寫死一個 px —— 換佈景時才會跟著走。
+ */
+.astryx-side-nav-item {
+  /* ⚠️ 不要鉤 [class*='SideNavItem__styles.label']:那是 StyleX 編譯
+     出來的類名,升版就對不上。SideNavItem 的 styles.label 只有 flex/overflow
+     **沒有 font-size** —— 設在這顆公開的 .astryx-side-nav-item 上,label 靠繼承就拿得到。 */
+  font-size: calc(var(--font-size-base) + 0.25px);
+  /*
+   * ⚠️ 字重平常 400,**只有 hover / data-pinned 才 500**(上面那段 hover 規則),
+   * 不要整列提到 500。英文看起來比中文淡是字型本身的事(中文走系統字型)。
+   */
+}
+
+/*
+ * 品牌那一行:不要粗體、字再大 0.25px。
+ *
+ * ⚠️ 做法是**在公開 class 底下重映射公開 token**,不是鉤編譯類名
+ * ([class*='SideNavHeading__styles.heading'] 那種升版會靜默失效)。
+ * SideNavHeading 的 heading 的字重吃 `--font-weight-semibold`、
+ * 字級吃 `--text-large-size` —— 在 `.astryx-side-nav-heading`(themeProps
+ * 的公開 class)這一層把那兩個變數換掉,底下的 span 自己會跟上。
+ * 連帶效果:同一塊裡的 super/subheading 也吃這兩個 token,但我們只用 heading。
+ * Logo 的線條粗細 1.75 跟這裡綁在一起(見 components/Logo.tsx)。
+ */
+.astryx-side-nav-heading {
+  --font-weight-semibold: var(--font-weight-normal);
+  --text-large-size: calc(var(--font-size-lg) + 0.25px);
+}
+
+/*
+ * 側邊欄整體往右、往下各留一點呼吸空間,不要貼著視窗邊。
+ *
+ * 下在 `.astryx-side-nav` 這一層,不是每一列各推一次 —— 品牌列、工具列、
+ * 清單、帳號區要一起動,一個一個加的話以後多一區就少推一塊。
+ */
+.astryx-side-nav {
+  /* --spacing-0-5 = 2px */
+  padding-inline-start: var(--spacing-0-5);
+  padding-block-start: var(--spacing-0-5);
+}
+
+/*
+ * 帳號區(SideNav 貼齊底部那條 sticky)的下 padding 收成 0 ——
+ * 上面的空白由 Sidebar.tsx 的 accountDivider 管,兩邊合起來讓帳號區
+ * 落在分隔線與視窗底的中間(細節見那個檔案)。
+ *
+ * ⚠️ 用**結構選擇器**(SideNav 的最後一個直接子層就是那塊 sticky),
+ * 不鉤 [class*='SideNav__styles.stickyBottom'] ——
+ * 編譯類名升版就對不上。DOM 結構變的機率遠低於內部改名。
+ */
+.astryx-side-nav > :last-child {
+  padding-block-end: 0;
+  /*
+   * 上 padding 也收掉:清單捲到底時,最後一列跟帳號區
+   * 那條線的距離要跟「Search 到它下面那條線」一樣(4px)。
+   * 4px 由捲動區自己的 padding-block-end 出;這裡的 8px 與 accountDivider
+   * 的 margin-top(見 Sidebar.tsx,兩邊都是 0)都不能再墊。
+   * ⚠️ 這塊是**貼底錨定**的:高度變小只會讓它的上緣往下退、捲動區變長,
+   * 線與底下帳號那幾列的位置一格都不動(從底往上量的距離沒變)。
+   */
+  padding-block-start: 0;
+}
+
+/*
+ * 第一列 / 最後一列到上下那兩條分隔線的距離都是 4px,
+ * 而且**不能靠負邊距把內容推出捲動區**。
+ *
+ * ⚠️ **不要用負邊距代替**:把捲動區的內容用負的 margin 往上拉,那一列會跑到
+ * 捲動區的裁切邊(padding box)外面,**上緣連同會滑的高亮(它還要再往上補 2px
+ * 的浮起量)一起被 overflow 切掉**。下緣用負邊距是同一個病(捲到底時最後一列的高亮被切)。
+ *
+ * 做法:**移動裁切邊,不要移動內容** —— 把 sticky 工具區的下內距與捲動區
+ * 自己的上下內距歸零,裁切邊就落在分隔線上,4px 的空隙改由 section 自己
+ * 本來就有的內距出。位置不變,差別只在沒有任何東西跑到裁切邊外面。
+ * ⚠️ 會捲的那一層是 SideNav 三個直接子層裡**中間**那個(頭尾兩個是 sticky
+ * 的工具區與帳號區)—— 選「不是第一個也不是最後一個」,
+ * 不能寫 `> div`(那會把品牌列與帳號區一起往上搬)。
+ */
+/*
+ * ⚠️ **收合的時候也要套**。寫成 `:not([data-collapsed])` 的話,rail 狀態會把設計系統
+ * 預設的內距要回來(品牌區的下內距 8px + 捲動區的上內距 4px),
+ * **底下每一列往下跳 12px**,而且那一跳落在收合動畫**結束**那一幀
+ * (`data-collapsed` 是等寬度跑完才翻的,見 Sidebar.tsx 的 collapsible)。
+ * 兩種狀態套同一份內距,翻狀態的那一下垂直位置就一個 px 都不動。
+ */
+.astryx-side-nav > div:first-child {
+  padding-block-end: 0;
+}
+.astryx-side-nav > div:not(:first-child):not(:last-child) {
+  padding-block: 0;
+}
+
+/*
+ * 同一件事的**水平**那一半:**兩種狀態下,每一顆圖示的中心都落在 `<nav>` 的正中央**。
+ *
+ * 「收合後圖示沒置中」與「收合時只有 logo 會往左跑」是同一個根:
+ *
+ *   - 品牌那顆 logo 在 rail 裡是**自己置中**的(48 寬的 rail 裡落在 14),
+ *     而列是靠左排的(圖示落在 18)—— 所以只有 logo 看起來會跑。
+ *   - 而「置中」本身也不準:`<nav>` 只有**左邊**有 2px 的呼吸空間(`padding-inline-start`),
+ *     所以 48 的一半不是列的一半,置中之後列還會溢出 1px。
+ *
+ * 解法是把兩邊都推到同一條中線上(24 = 48 ÷ 2):
+ *   - rail 的 `<nav>` 左右內距**對稱**(兩邊都 `--spacing-0-5`),置中才是真的置中;
+ *   - 三個直接子層的左右內距從 8 收成 6(`--spacing-1-5`),於是**展開**時
+ *     圖示左緣落在 2 + 6 + 8 = 16,中心剛好也是 24。
+ *
+ * 展開與 rail 兩種狀態下,工具列三顆圖示與品牌 logo 的**中心都是 24**,
+ * 翻狀態的那一下一個 px 都不動(跟上面垂直那一半同一個要求)。
+ */
+.astryx-side-nav > div {
+  padding-inline: var(--spacing-1-5);
+}
+.astryx-side-nav[data-collapsed] {
+  padding-inline: var(--spacing-0-5);
+}
+.astryx-side-nav[data-collapsed] > div {
+  align-items: center;
+}
+
+/*
+ * 訊息串從**上面**開始長。
+ *
+ * `ChatMessageList` 的第一個子層是一個 `flex: 1` 的隱形 spacer —— 內容不滿一屏時
+ * 它把整串往下推去貼輸入框,那是一般聊天軟體的慣例,但這裡是問答工具,
+ * 要的是文件式的由上往下。
+ *
+ * ⚠️ 結構是 `.astryx-chat-message-list > div(inner) > div[aria-hidden]`
+ * (spacer 掛在**內層那個 wrapper** 底下,不是 list 的直接子層)。
+ * 認 aria-hidden 的結構位置,不認編譯類名(升版會失效的那種)。
+ * 訊息裡自己的 aria-hidden(頭像佔位)在 article 底下更深層,不會被掃到。
+ * 捲動與黏底不受影響:內容超過一屏之後 spacer 本來就是 0 高。
+ */
+.astryx-chat-message-list > div > div[aria-hidden] {
+  flex: 0 0 auto;
+}
+
+/*
+ * Shift+點擊不要把整片對話區「框」起來。
+ *
+ * 那是瀏覽器的預設:點一下會放一個看不見的插入點,Shift+點第二下
+ * 就把兩點之間**跨泡泡整片**選取起來 —— 在文件裡合理,在對話介面看起來像壞掉。
+ * 做法:清單層關掉選取,**泡泡內容開回來** —— 複製答案裡的一段字照常可以,
+ * 只是選取不會再跨出單一則訊息、也不會從空白處開始。
+ */
+.astryx-chat-message-list {
+  user-select: none;
+}
+.astryx-chat-message-list .astryx-chat-message-bubble,
+.astryx-chat-message-list .astryx-markdown {
+  user-select: text;
+}
+
+/*
+ * 捲到底時,最後一則跟輸入框之間的留白收小。
+ * spacious 的 ChatLayout 給訊息區 24px 的底部內距,加上清單自己的 16px,
+ * 合計 40px —— 收成 4px(合計 20px)。
+ * ⚠️ 用結構選擇器:訊息區是 `.astryx-chat-layout` 的**第一個**直接子層
+ * (第二個是浮在下面的 dockContainer),不鉤編譯類名。
+ */
+.astryx-chat-layout > :first-child {
+  padding-block-end: var(--spacing-1);
+}
+
+/*
+ * 輸入框的預設高度與陰影。
+ * 開關是 Chat.tsx 包裝層上的 `data-composer-mode`(landing = 空白頁、
+ * chat = 續問頁)—— StyleX 寫不出「包裝層改設計系統子孫」,規則放這裡。
+ *
+ * - 空白頁:輸入區預設**三行**高(3lh = 三個行高;--spacing-2 是
+ *   contenteditable 自己上下各 4px 的內距)。打字仍從最上面開始 ——
+ *   contenteditable 是塊狀排版,內容本來就從頂端長,只是把框先撐開。
+ * - 續問頁:兩行。
+ *
+ * ⚠️ 這裡只管高度。**陰影走 Chat.tsx 的 `composerRaised` xstyle**,
+ * 不要在這裡用結構選擇器補 —— 理由見那個常數的註解(drawer 會換掉第一個子層)。
+ * ⚠️ 認的是 `[contenteditable]` 這個屬性,不是子層順序:
+ * `ChatComposerInput` 的 xstyle 落在**外層 wrapper** 上,
+ * 設在那裡的話點空白處不會聚焦到編輯區 —— 高度要下在編輯區本身。
+ * (設計系統只有 `maxRows`,沒有 minRows 可用。)
+ */
+[data-composer-mode='landing'] .astryx-chat-composer [contenteditable='true'] {
+  min-height: calc(3lh + var(--spacing-2));
+}
+[data-composer-mode='chat'] .astryx-chat-composer [contenteditable='true'] {
+  min-height: calc(2lh + var(--spacing-2));
+}
+/*
+ * 陰影**不在這裡** —— 它走 `ChatComposer` 的 xstyle(見 Chat.tsx 的
+ * `composerRaised`)。不要用 `> :first-child` / `> :last-child` 這類
+ * 結構選擇器,前者在 drawer 出現時會打到透明的殼上;
+ * 設計系統既然開放了 body 的樣式插槽,就不要再從外面猜位置。
+ */
+
+/*
+ * AI 那幾則的內容欄**拉回跟提問同一條左緣**。
+ *
+ * 頭像的佔位已經在 Chat.tsx 用負邊距歸零(見 assistantAvatar),
+ * 但 ChatMessage 的 avatarWrap 與內容欄之間還有 8px 的 flex gap ——
+ * 那個 gap 在項目**之間**,元素自己的負邊距吃不掉它,只能在 wrap 上
+ * 用 margin-inline-end 抵銷,AI 泡泡左緣才會跟提問那則的外框同一條線。
+ *
+ * ⚠️ 這條同時管 **AI 與同事**(同事的訊息也是 `sender="assistant"`)。
+ * 兩者的頭像都包在 `styles.avatarBox` 的同一組負邊距幾何裡(`AssistantAvatar`
+ * 與 `PersonAvatar`),所以要補償的 flex gap 也一樣 —— 這正是「同事的區塊
+ * 跟 AI 對齊」的做法。⚠️ 哪天有 `sender="assistant"` 但頭像**沒有**那組幾何的
+ * 訊息,它會被這條多拉 8px;`:not(:only-child)` 只擋掉「完全沒有頭像欄」那種。
+ */
+.astryx-chat-message-list article[data-sender='assistant'] > :first-child:not(:only-child) {
+  margin-inline-end: calc(var(--spacing-2) * -1);
+}
+
+/*
+ * 對比加強(個人設定裡的對比拉桿)。
+ *
+ * ⚠️ **不覆寫任何 `--color-*`** —— 佈景用出廠的 theme-neutral,不做客製、
+ * 不覆寫 token。覆寫 token 等於要為淺色與深色各維護一套,而且每次
+ * 設計系統升級都可能對不上。這裡改用 CSS `filter`,佈景完全不動。
+ *
+ * 值由 `lib/displayPrefs.ts` 寫進 `--user-contrast`(1 = 原樣,2 = 兩倍)。
+ * `data-user-contrast` 只在**不等於 100%** 時才掛 —— 有些瀏覽器看到
+ * `filter: contrast(1)` 還是會另開一層合成,字會變糊,所以預設值要完全沒有
+ * 這條規則,而不是「乘以 1」。
+ *
+ * ⚠️ 掛在 `#root` 不是 `html`:`filter` 會建立新的 containing block,
+ * 掛在根元素上會讓 `position: fixed` 的東西(小夥伴、浮層、對話框)
+ * 改成相對於它定位 —— 那會讓每一個浮層錯位。Dialog 走 top layer,不在 #root 裡。
+ * ⚠️ 自己 portal 出去的浮層(Save to notes、筆記「/」選單、框選截圖)掛在
+ * #root 裡的佈景層(`lib/portalHost.ts`),濾鏡開著時會以 #root 為定位基準、也一起套濾鏡 ——
+ * #root 跟視窗一樣大、本身不捲,位置不變;套濾鏡反而是對的(它們本來就是頁面的一部分)。
+ */
+:root[data-user-contrast] #root {
+  filter: contrast(var(--user-contrast, 1));
+}
+
+/*
+ * 頭像裁切的**直立**縮放拉桿(`components/AvatarCropper.tsx`)。
+ *
+ * 設計系統的 vertical Slider 把軌道高度**寫死成 160px**
+ * (`@astryxdesign/core` 的 `Slider.styles.trackContainerVertical`),
+ * 元件外面給的高度它不吃。而這條軌道要跟 **128px 的圓形預覽**切齊 ——
+ * 128 是 `Avatar size="xl"` 的尺寸,圓圈必須跟它一樣大(不然挑完照片那一瞬間
+ * 頭貼會突然變大)。
+ *
+ * 不收回來的話拇指會凸到圓圈下緣外面 32px,正好壓在底下那排按鈕上。
+ *
+ * ⚠️ 範圍限定在 `[data-avatar-zoom]` 底下,不會動到別處的 Slider。
+ * ⚠️ 選擇器要有兩層才壓得過 StyleX 的單一 class(0,1,0)。
+ */
+[data-avatar-zoom] .astryx-slider,
+[data-avatar-zoom] .astryx-slider > * {
+  height: 100%;
+}
+
+/*
+ * 拉桿的外觀**全部照設計系統**,不要自己改軌道或拇指的樣子。
+ * 這裡只管兩件不是外觀的事:上面那條直立軌道的高度,與底下的過場。
+ *
+ * 拇指**只在非拖曳時才滑過去**。
+ *
+ * ⚠️ **過場只給「跳躍式」的改動**(點軌道、方向鍵、Reset),`[data-dragging]` 時要關掉:
+ * 手指壓著拖是直接操作,必須 1:1 跟手 —— 掛過場會變成拇指追在指標後面,
+ * 那比沒有過場更難用。那個屬性是 `AvatarCropper` 自己掛的
+ * (設計系統的 Slider 沒有對外掛拖曳狀態)。
+ * ⚠️ 按在**軌道**上那一下不掛(壓著移動之後才掛),否則點軌道那一跳的過場也被關掉 ——
+ * 判法在 `useSliderDrag`。
+ *
+ * ⚠️ 拖起來順不順另外取決於**刻度**(刻度太粗,拇指會一格一格跳),
+ * 那一半在 `AvatarCropper.ZOOM_STEP`,不是這裡。
+ */
+@media (prefers-reduced-motion: no-preference) {
+  /*
+   * ⚠️ 兩種拉桿共用同一條 —— 縮放那條是直立的(動 `bottom`)、設定那兩條是
+   * 橫的(動 `inset-inline-start`),所以兩個屬性都要列。
+   * ⚠️ `:not([data-dragging])` 是關鍵:拖曳中要 1:1 跟手(見 `useSliderDrag`)。
+   * 兩個 `data-*` 都掛在**同一層**上,選擇器才寫得對稱。
+   */
+  [data-avatar-zoom]:not([data-dragging]) .astryx-slider-thumb,
+  [data-settings-slider]:not([data-dragging]) .astryx-slider-thumb {
+    transition:
+      bottom var(--duration-fast) var(--ease-standard),
+      inset-inline-start var(--duration-fast) var(--ease-standard),
+      background-color var(--duration-fast) var(--ease-standard),
+      box-shadow var(--duration-fast) var(--ease-standard);
+  }
+}
+
+/*
+ * 對話框的進退場。
+ *
+ * **進場 400ms 太久。** 設計系統把 `<dialog>` 的進場定在
+ * `--duration-medium-max`(實際 400ms),而 UI 動畫的預算是 300ms —— 這些是
+ * 「按一下就開」的面板,不是需要儀式感的東西。收到 `--duration-medium-min`
+ * (225ms),曲線沿用設計系統的 `--ease-standard`(先快後慢,正是進場要的),
+ * 再配上背景模糊的補間。
+ *
+ * **全站的對話框都套。** 退場是靠呼叫端把 `close()` 延後演的,收在
+ * `components/useDialogExit.ts` 這支共用 hook 裡:每個對話框攤一次 `dialogProps`
+ * 就同時拿到記號與配對的退場,不會有「進場演 225ms、關掉硬切」的不對稱。
+ *
+ * ⚠️ 選擇器寫成 `dialog[data-app-dialog]`(0,2,1)是為了**壓得過 StyleX 的單一 class**
+ * (0,1,0);認屬性不認 `.astryx-dialog`,是因為記號由 hook 掛 —— 沒有走那支 hook 的
+ * 對話框(等於沒有退場的)就不該被進場規則打到。
+ *
+ * ⚠️ **這條不影響 `[role=menu]` 的 300ms。** 那個數字有自己的理由(見選單 morph 那段),
+ * 不要一起動。
+ */
+dialog[data-app-dialog] {
+  animation-duration: var(--duration-medium-min);
+}
+
+/*
+ * **背後那層遮罩也要演進場。**
+ *
+ * 面板自己有進場(淡入 + `scale(0.95)`),而設計系統畫的
+ * `::backdrop`(深色 + `blur(2px)`)是**整片一次蓋上去**的 ——
+ * 打開的那一瞬間就變成「畫面先暗掉,面板才開始演」,看起來是憑空跳出來一塊東西。
+ *
+ * 遮罩跟面板**同一條時間、同一條曲線**(225ms / `--ease-standard`):背景化開與
+ * 面板落定是同一件事,錯開反而會看成兩層各演各的。
+ *
+ * ⚠️ **模糊要從 0 開始長**,不是只淡入:只淡黑色的話背景是「變暗」,
+ * 一起帶著 `backdrop-filter` 才是「景深往後退」,面板浮起來的感覺。
+ *
+ * ⚠️ 起點的 `blur(0px)` 要**明寫單位**:`blur(0)` 在補間時建不起來(跟同一個檔案
+ * 裡 `scale` 起點要明寫是同一類的坑)。
+ * ⚠️ **正式 build 裡它會長得不一樣**:Lightning CSS 把 `blur(0px)` 壓成 `blur()`
+ * (省略參數,規範上等同 0),Chromium 解析成 `blur(0px)`、補間照跑 ——
+ * 但 dev 與 build 的 CSS 不同,改這段之後要對著 `dist/assets/*.css` 再看一次,不要只信 dev。
+ * ⚠️ `backwards` 是必要的:`<dialog>` 是在 `showModal()` 的那一幀才長出 backdrop 的,
+ * 沒有它的話第一幀會先閃一下全黑再回頭演。
+ */
+dialog[data-app-dialog]::backdrop {
+  animation: t100-settings-backdrop-in var(--duration-medium-min) var(--ease-standard) backwards;
+}
+
+/*
+ * **進場的方向性位移釘成 0 —— 這個面板從正中央長出來,不從某個方向飛進來。**
+ *
+ * 設計系統的 `<dialog>` 進場會往「觸發它的那個元素」的方向偏 16px 再滑回來
+ * (`Dialog.tsx` 的 `getDialogDirection`),而它認的「觸發元素」是**開啟當下的
+ * `document.activeElement`** —— 用滑鼠點自己的名字時,焦點可能還留在剛才按過的
+ * 任何地方 —— 方向跟按到的那一列對不上,每次還不一樣。
+ *
+ * 一個置中的 modal 本來就沒有「來源」可言(origin-aware 講的是 popover:
+ * 它有 trigger、要從 trigger 長出來;modal 保持中心)。拿掉之後剩下
+ * 「淡入 + `scale(0.95)` → `1`」,配上同時化開的背景,
+ * 而不是一塊東西從畫面上方竄下來。
+ *
+ * ⚠️ **`!important` 在這裡是必要的**(這份檔案另一處是側邊欄的
+ * `[data-collapse-pending]`,理由寫在那邊;兩處都是「要壓過行內樣式」才用):
+ * 那兩個變數是設計系統在 `showModal()` 之前用 `dialog.style.setProperty()`
+ * 寫成**行內樣式**的,行內樣式壓得過一般規則,只有 `!important` 蓋得掉。
+ * 要拿掉它就得先讓設計系統能關掉方向性位移(它現在沒有這個 prop)。
+ */
+dialog[data-app-dialog] {
+  --dialog-dir-x: 0px !important;
+  --dialog-dir-y: 0px !important;
+}
+
+@keyframes t100-settings-backdrop-in {
+  from {
+    opacity: 0;
+    backdrop-filter: blur(0px);
+  }
+}
+
+/*
+ * reduce 下**跟著面板一起不演**。
+ *
+ * 設計系統在 reduce 下把面板自己的進場整個關掉(`Dialog.tsx` 的
+ * `animationName: 'none'`)—— 遮罩要是自己還演,就會變成「面板已經在那裡了,
+ * 背景還在慢慢暗下去」,那比硬切更奇怪。這裡守的是**「面板與背景是同一件事」**
+ * 這條規則,兩種模式下都成立(一般模式一起演 225ms,reduce 一起零)。
+ * ⚠️ 不要改成縮短時間(例如 `--duration-fast`):那只是把不同步縮短,沒有解掉。
+ *
+ * ⚠️ **這跟退場不一樣,不要一起改**:退場在 reduce 下仍然淡出 165ms
+ * (見上面那段)—— 那邊面板自己也在淡出,兩者本來就同步,而淡出承載的是
+ * 「這個東西走了」。
+ */
+@media (prefers-reduced-motion: reduce) {
+  dialog[data-app-dialog]::backdrop {
+    animation: none;
+  }
+}
+
+/*
+ * **退場**:縮一點 + 淡出。
+ *
+ * `<dialog>` 一旦 `close()` 就是 `display: none`,補不了幀,所以退場要由呼叫端
+ * **把 `close()` 延後**讓這段演完(`AccountSettingsDialog` 的 `requestClose`,
+ * 時間對齊 `--duration-fast-max` = 165ms)。同一份檔案底下的終端機面板
+ * 也是用同一招。
+ *
+ * ⚠️ `scale` 的**起點要明寫**:起始值是 `none` 的話,`none → 0.98` 這段補間
+ * 在同時掛著 `translate` 的元素上建不起來,而且會把整個 `scale` 吞掉
+ * (跟 `[data-pressable]` 同一個坑)。
+ *
+ * 退場比進場短(165 vs 225)是刻意的:關掉是「系統回應」,要乾脆。
+ */
+dialog[data-app-dialog] {
+  scale: 1;
+}
+
+/*
+ * ⚠️ **淡出在 `prefers-reduced-motion` 下也要留著**。
+ * 「減少動態」是更少、更溫和,**不是零** —— 位移與縮放要拿掉,淡出要留:
+ * 它承載的是「這個東西走了」,那是理解用的,不是裝飾。
+ * 所以 `opacity` 寫在外面,只有 `scale` 包在 no-preference 裡
+ * (`requestClose` 因此不必依 `matchMedia` 分支)。
+ */
+dialog[data-app-dialog][data-leaving] {
+  opacity: 0;
+  transition: opacity var(--duration-fast-max) var(--ease-standard);
+  /*
+   * 淡出中的框**按不到**:清資料延後到退場演完才做(標題要撐住),
+   * 所以那 165ms 裡按鈕背後的資料還是有效的 —— 按了「取消」又手快點到旁邊的「刪除」,
+   * 或「留在這裡」接著點到「不存,直接離開」,都會真的執行。
+   * ⚠️ 不用 `inert`:`inert` 會把框裡的焦點拿走,而 ⌘K 在淡出途中
+   * 再按一次會 `cancelClose()` 把框留下來 —— 留下來的框沒有焦點,接著打的字全掉到 body 上。
+   * 「淡出那 165ms 內用鍵盤 Tab + Enter 按到別顆」擋不到(手要快過 165ms),不處理。
+   */
+  pointer-events: none;
+}
+
+dialog[data-app-dialog][data-leaving]::backdrop {
+  opacity: 0;
+  transition: opacity var(--duration-fast-max) var(--ease-standard);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  dialog[data-app-dialog][data-leaving] {
+    scale: 0.98;
+    transition:
+      opacity var(--duration-fast-max) var(--ease-standard),
+      scale var(--duration-fast-max) var(--ease-standard);
+  }
+}
+
+/*
+ * 側邊欄收合 / 展開的過場。
+ *
+ * 動的是 `<nav>` 的寬度:展開時是 Sidebar.tsx 下的 inline `width`(拖出來
+ * 的那個數),收合時是設計系統的 rail 寬(`--spacing-12`)。兩邊都是明確的長度,
+ * 瀏覽器就能在中間補幀。
+ * ⚠️ 收合與展開要對稱,細節見 `Sidebar.tsx` 的 `collapsible`。
+ *
+ * ⚠️ 拖曳改寬度時**不套**:`SidebarResizer` 在拖的時候會掛 `data-resizing`,
+ * 那時候寬度是跟著手走的,再加過場會慢半拍。
+ * ⚠️ 手機抽屜不在這條裡:抽屜模式沒有 `<nav>`(是 MobileNav 的 dialog),
+ * 它自己有滑入滑出的動畫。
+ */
+/*
+ * ⚠️ **曲線是 `--ease-panel`,時間是 340ms**。
+ * 不用 `--ease-standard`:它是 `cubic-bezier(.24, 1, .4, 1)`,**極度前傾** ——
+ * 10% 的時間就走掉約 60% 的距離,所以是「彈一下、然後慢慢爬」,尾巴那一大段
+ * 幾乎看不出在動。`--ease-panel`(`cubic-bezier(.32, .72, 0, 1)`)的速度分布平均得多。
+ * ⚠️ 340ms 是字面值,不是 token:`--duration-medium` 300 太短、`--duration-medium-max`
+ * 400 太拖。
+ * ⚠️ **改這個數字不必動 JS** —— `Sidebar` 用 `lib/transitionMs.ts` 去問這條規則本人。
+ */
+@media (prefers-reduced-motion: no-preference) {
+  .astryx-side-nav:not([data-resizing]) {
+    transition: width 340ms var(--ease-panel);
+  }
+}
+
+/*
+ * 「收合動畫途中圖示會彈一下」那件事**不在這個檔案裡治**,留這段是因為很容易改錯地方。
+ *
+ * ⚠️ 別跟上面那兩條(`> div` 的內距、`[data-collapsed] > div` 的 `align-items`)搞混:
+ * 那兩條治的是**翻狀態那一幀的位移**,是靜止的兩種狀態對不齊;
+ * 這一段講的是**動畫中途**圖示被置中到半寬再滑回來,治在 `Sidebar.tsx`。兩件事、兩個地方。
+ *
+ * 成因:`data-collapsed` 一掛上去,`SideNav` 的三個直接子層立刻變成
+ * `align-items: center`,要是那時候 `<nav>` 還是展開的寬度,32px 的 rail 圖示
+ * 就會被置中到整條的正中間,再一路滑回 rail 的位置。
+ *
+ * 解法在 `Sidebar.tsx`:`SideNav` 的 `isCollapsed` **等寬度跑完才翻**,
+ * 所以 `data-collapsed` 只會在 `<nav>` 已經是 48px 的時候出現。
+ * 要是把延後切換拿掉,彈一下會原樣回來。
+ */
+
+/*
+ * 收合到一半(`data-collapsing`,見 `Sidebar.tsx` 的 `collapsible`):
+ * DOM 還是展開的樣子,標籤**由收窄的側邊欄一路夾掉**,沒有任何淡出 —— 不要先藏字再縮。
+ *
+ * 夾字這件事不必自己寫:`SideNavItem` 的標籤本來就是
+ * `flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap`。
+ * 列寬跟著 <nav> 縮,標籤能用的寬度就一路變小,
+ * 於是「New chat」→「New c…」→「N…」→ 沒了。
+ *
+ * ⚠️ 這一段**沒有規則要下**,只留這段說明:不要在這裡加 opacity 的淡出,
+ * 那會變成「字先不見、面板才關」。
+ */
+
+/*
+ * 寬度在跑的時候,側邊欄裡的字**一律夾掉、不准換行**。
+ *
+ * 側邊欄窄到一定程度,空資料夾底下那句「No chats yet.」
+ *(`astryx-text`,`white-space: normal`)就從一行變三行,
+ * 底下整串跟著往下掉。列的標籤沒事是因為
+ * `SideNavItem` 自己下了 nowrap,但**側邊欄裡不是列的那些字沒人管**
+ *(還有資料夾名字那幾個 span,名字一長也會斷行)。
+ *
+ * ⚠️ 認 `data-animating`(收合**與展開**都掛),不是 `data-collapsing` ——
+ * 展開那一頭同樣會經過 48px:狀態第一幀就翻成展開、整份 DOM 立刻長出來,
+ * 那時候 `<nav>` 還是 rail 的寬度,同一句話就在那裡斷成三行再收回去。
+ *
+ * 夾掉靠的是 `<nav>` 本來就有的 `overflow: hidden`(設計系統下的),
+ * 所以這裡只要關掉換行,超出去的部分自然被面板邊緣切掉。
+ *
+ * ⚠️ **只在寬度跑的那 300ms 裡套**:拖曳的最小寬度(MIN_WIDTH)還很寬,
+ * 那些字不會斷行;收合/展開是唯一會經過 48px 的路。範圍限在過場裡,
+ * 靜止時的樣子一個 px 都不動(展開 normal、過場中 nowrap、收完回 normal)。
+ */
+.astryx-side-nav[data-animating],
+.astryx-side-nav[data-animating] *,
+.astryx-side-nav[data-collapse-pending],
+.astryx-side-nav[data-collapse-pending] * {
+  white-space: nowrap;
+}
+
+/*
+ * 過場中不要留捲軸的預留位 —— 那 8px 在 48px 上看得出來,而且只出現在過場中間。
+ * (上面那條 `scrollbar-gutter: stable` 認的是 `:not([data-collapsed])`,
+ * 收合中與展開中都沒掛 `data-collapsed`,所以要自己排除。)
+ */
+.astryx-side-nav[data-animating] > div,
+.astryx-side-nav[data-collapse-pending] > div {
+  scrollbar-gutter: auto;
+}
+
+/*
+ * 🚨 **收合「沒有」進場動畫,這裡刻意不留任何規則。**
+ *
+ * 收合就只有寬度在動,內容在最後一幀換掉。給 rail 的內容加進場都會出問題:
+ *  - 整塊淡入 / 從旁邊滑進來:收完畫面會閃一下、抖一下 —— 位置沒變的東西
+ *    加起始位移就只能是「先跑掉再跑回來」。
+ *  - 逐列依序淡入:寬度收完之後 rail 的中段會有一個洞慢慢補上,而上下兩區早就是
+ *    實心的,看起來就是中間那塊在閃。「依序出現」在定義上就是「一開始看不到」,
+ *    那個洞是它的本質,不是參數調錯。
+ */
+
+/*
+ * 寬度在跑的那 340ms 裡,把重排關在 `<nav>` 裡面。
+ *
+ * `transition: width` 動的是排版屬性,每一幀側邊欄裡的每一列都要重新排(標籤被夾、
+ * 圖示重排)。這件事改不掉 —— 要的就是字「一路被夾掉」,transform 做不到。
+ * 能做的是不讓那些內部的重排往外冒:`contain: layout paint` 告訴瀏覽器 nav 裡面
+ * 怎麼排都不影響外面,外面只需要跟著 nav 自己的寬度動。
+ *
+ * ⚠️ **只在過場中掛**:`contain: layout` 會讓 nav 變成 fixed 後代的定位基準
+ * (拖曳幽靈是 fixed 的),靜止時掛著的話拖曳的座標系會偏掉一個側邊欄。
+ * 過場的 300ms 內不可能同時在拖(收合鈕一按,拖曳就結束了)。
+ */
+.astryx-side-nav[data-animating],
+.astryx-side-nav[data-collapse-pending] {
+  contain: layout paint;
+}
+
+/*
+ * 收成 rail 之後,滑到資料夾 / Shared 上跳出來的那個浮層**要有寬度上限**
+ * (約 20 個字寬)—— 一句長問句當標題時,浮層會被撐到整個畫面寬。
+ *
+ * ⚠️ 不要改成在 JS 裡截字:那樣「rail 不 rail」必須當成 prop 傳給每一列,
+ * 每按一次收合/展開,每一列的 `memo` 全部失效、整份清單重算,正好擋在動畫第一幀前面
+ * (見 Sidebar.tsx `RowProps` 那段)。用 CSS 的話,React 那邊完全不必知道自己收起來了。
+ *
+ * 這條下在清單上,所以取的是**列**的寬:`16.5rem` = 264px,加上面板自己的 8px 內距,
+ * 浮層是 272px。夾掉的省略號不必自己寫 ——
+ * `SideNavItem` 的標籤本來就是 `flex: 1 / min-width: 0 / ellipsis`。
+ *
+ * ⚠️ **下在那份清單自己身上(`[data-rail-flyout]`),不是浮層的面板上。**
+ * 寫成 `.astryx-side-nav[data-collapsed] .astryx-popover-surface` 的話會連
+ * **每一列的「⋯」下拉選單**一起夾到 272px —— 它走的是同一個 `usePopover`、
+ * 帶同一個 class,而且就渲染在 `<nav>` 裡面。面板的寬度本來就是內容
+ * 撐出來的,夾住清單就等於夾住面板,結果一樣、範圍不會外溢。
+ */
+[data-rail-flyout] {
+  max-width: 16.5rem;
+}
+
+/*
+ * 搜尋面板:**捲軸的位置永遠留著**。
+ *
+ * 20 列要捲、篩到 7 列不用捲 —— 捲軸一消失,清單可用的寬度就多出十幾 px,
+ * 每一列的文字跟著重排,看起來就是整個面板抖一下。`stable` 讓那條槽一直在,
+ * 有沒有捲軸畫面都一樣寬。
+ * ⚠️ 代價是不用捲的時候右邊固定空一條 —— 比每次搜尋都抖一下好。
+ */
+dialog[data-search-dialog] [role='listbox'] {
+  scrollbar-gutter: stable;
+}
+
+/*
+ * 高度補間那 125ms 裡,清單**不要長出捲軸**。
+ *
+ * **面板變大**的時候才會發生:內容已經換成新的、面板還在長,中間那幾幀清單塞不下就閃
+ * 一條捲軸出來。記號由 `CommandPalette` 掛上,高度補間跑完(量下面那條 transition)再多 25ms 拿掉
+ * (或一碰滾輪就拿掉)。
+ * ⚠️ 用 `hidden` 不是 `clip`:`clip` 會讓元素連程式捲動都不行,而鍵盤上下鍵選到
+ * 看不見的那一列時,元件要能把它捲進來。
+ * ⚠️ **這條規則會擋住滾輪**,所以記號留太久就是「滾輪沒反應」(例如拆記號的計時器被
+ * effect 的 cleanup 清掉、記號卻留著,面板不關就好不了)。
+ * 誰要掛這個記號,先讀 `CommandPalette.tsx` 的 `armResizing`。
+ */
+dialog[data-search-dialog][data-resizing] [role='listbox'] {
+  overflow-y: hidden;
+}
+
+dialog[data-search-dialog] {
+  /*
+   * 搜尋面板的高度**用補間的**:打字把清單從 20 列篩成 5 列時,面板不要「啪」一下變矮。
+   *
+   * ⚠️ **高度是 `CommandPalette.tsx` 量好之後寫成明確的 px 的**,這一行只負責補間。
+   * 怎麼量的寫在那邊(放掉 inline `height` → 量一次 → 放回去),不要在這裡再抄一遍。
+   * ⚠️ 只認 `[data-search-dialog]`,不是全站的 `[data-app-dialog]` —— 其他對話框的
+   * 高度不會在開著的時候變,給了只是多一條沒人用的規則,而且設定對話框自己有
+   * 兩處刻意 animate 版面屬性的地方,不要互相打架。
+   * ⚠️ 時間取 `--duration-fast`:這是「內容變了」的回饋,不是進場,要快。
+   *
+   * ⚠️ `interpolate-size` 留著,但它**不是**這條成立的前提 —— 它解的是
+   * 「關鍵字 ↔ 長度」那種明確轉換,不是「內容變了」,只靠它的話仍然是一步到位。
+   * 主力是 `CommandPalette` 的量測 effect;這裡留著它只是讓那條路不成立時至少不會更糟。
+   */
+  interpolate-size: allow-keywords;
+}
+/*
+ * ⚠️ 高度補間只在 no-preference 下掛:面板長高 / 縮短是尺寸的變化,
+ * 本檔的原則是 reduce 下拿掉位移與縮放類的動畫。`CommandPalette` 拆 `data-resizing` 的計時器是去量
+ * 這條 transition 的(`transitionMs`),reduce 下量到 0s → 只等 `RESIZE_MARGIN_MS` 就拆,不必另外分支。
+ */
+@media (prefers-reduced-motion: no-preference) {
+  dialog[data-search-dialog] {
+    transition: height var(--duration-fast) var(--ease-standard);
+  }
+}
+
+/*
+ * 手機抽屜標頭**內建的關閉鈕藏起來**:關閉由我們自己放在
+ * 標頭最左邊的 X(`MenuToggle`,跟頂列的兩條槓是同一顆在變形)負責;
+ * 內建那顆在右上角,留著就會有兩顆 X。
+ *
+ * ⚠️ 認的是**我們自己掛的記號**(`MobileBrandBar` 的 `data-drawer-header`),
+ * 不是「標頭裡最後一顆按鈕」那種結構選擇器 —— 後者要依賴兩層沒有名字的容器,
+ * 還要依賴內建的鈕永遠排在最後,設計系統升版就會靜靜地失效(兩顆 X 一起出現)。
+ * 記號的兄弟只有那一顆內建的鈕,所以 `~ button` 打得準又不會誤傷。
+ */
+.astryx-mobile-nav [data-drawer-header] ~ button {
+  display: none;
+}
+
+/*
+ * 手機抽屜**滑進來**要有動畫。
+ *
+ * 設計系統給面板下了 `transition: transform 0.3s`,開跟關也確實是
+ * 兩個不同的 transform —— 但**開的那一趟補不了幀**。`<dialog>` 關著的時候是
+ * `display: none`,面板沒有「前一個值」可以起跑,transition 直接跳到終點
+ * (各瀏覽器都一樣)。
+ *
+ * ⚠️ `@starting-style` 沒有用:變 `display` 的是**外層的 dialog**,
+ * 面板自己的 display 從頭到尾沒變過,所以拿不到起始樣式那一幀。
+ * 所以用 `animation` —— 元素從 display:none 底下現身時,附在它身上的動畫會
+ * **重新播一次**,這正是我們要的(選單鈕那顆 X 用的是同一招)。
+ *
+ * 關的那一趟不必管:那時候元素在畫面上,設計系統原本的 transition 補得了幀,
+ * 而且它有把 `dialog.close()` 延後讓滑出演完。
+ *
+ * ⚠️ 認 `data-side`(設計系統公開的 theming 屬性),不是編譯類名。
+ * 這個站把抽屜釘死在左邊(見 Sidebar.tsx 的 `side`),但兩個方向都寫,
+ * 免得哪天改回 `auto` 只有一邊會動。
+ */
+@keyframes t100-drawer-in-start {
+  from {
+    transform: translateX(-100%);
+  }
+}
+@keyframes t100-drawer-in-end {
+  from {
+    transform: translateX(100%);
+  }
+}
+/*
+ * ⚠️ `:not([data-drag-ghost])`:手機抽屜裡拖曳時,幽靈是 portal 進這個 `<dialog>` 的直接子層
+ * (見 Sidebar.tsx 的 `ghostHost`)。不排除的話它也會吃到這支滑入動畫 —— keyframes 的 transform
+ * 蓋過 hook 寫的 `translate3d`,每次拿起來都從畫面左上角飛到指尖。
+ */
+@media (prefers-reduced-motion: no-preference) {
+  .astryx-mobile-nav[open][data-side='start'] > div:not([data-drag-ghost]) {
+    animation: t100-drawer-in-start var(--duration-medium) var(--ease-standard);
+  }
+  .astryx-mobile-nav[open][data-side='end'] > div:not([data-drag-ghost]) {
+    animation: t100-drawer-in-end var(--duration-medium) var(--ease-standard);
+  }
+}
+
+/*
+ * 手機版輸入框的 footer 可以折行,送出與錄音鈕才不會超出框外。
+ *
+ * 設計系統 `ChatComposer` 的 footer 是 `[footerLeft] … [footerRight]` 的
+ * 不換行 flex:左邊那排我們已經讓它折行了(Chat.tsx 的 composerActions),
+ * 但它最窄也只能縮到「最寬那一顆」(專案路徑那顆,名稱長的時候會到
+ * 230px),加上右邊固定的錄音 + 送出兩顆,在 360 寬的手機上就撐出框外。
+ * 讓 footer 本身可以折行:放不下時右邊那兩顆掉到下一行、靠右。
+ *
+ * ⚠️ footer 沒有公開的 class,用 `:has()` 從我們自己掛的 `[data-composer-footer]`
+ * 往上兩層認出它(結構:footer > footerLeft > 我們的 HStack)。
+ * ⚠️ 斷點的 768 要跟 `lib/media.ts` 的 `MOBILE_QUERY` 是同一條線(它又跟設計系統
+ * `AppShell` 的 `md` 對齊)—— 那邊改了這裡要跟著改,CSS 讀不到那個常數。
+ * ⚠️ **全站寫了 768 的地方,清單在 `lib/media.ts` 的 `MOBILE_QUERY` 上面**,
+ * 這裡不另外數一份。改斷點就照那份清單走一遍。
+ * 只在手機斷點套:桌機放得下,不要動它。
+ */
+@media (max-width: 768px) {
+  .astryx-chat-composer div:has(> div > [data-composer-footer]) {
+    flex-wrap: wrap;
+  }
+  .astryx-chat-composer div:has(> div > [data-composer-footer]) > :last-child {
+    margin-inline-start: auto;
+  }
+}
+
+/*
+ * 空白頁那四顆分類籤(Research / Writing / Coding / Creative)在手機上排成
+ * **兩排兩顆、整塊置中**。
+ *
+ * 兩件事各對應一條:
+ * 1. 只給 `flex-wrap` 的話瀏覽器會塞好塞滿 —— 375 寬正好放得下三顆,
+ *    於是變成 3+1。要 2+2 就得**讓每顆各佔一半**:basis 給
+ *    `calc(50% - gap/2)`,第三顆就一定擠不進第一排。
+ * 2. 群組本身是 `inline-flex`(設計系統),寬度是內容寬,所以整塊靠左。改成撐滿一整行的 `flex` 之後,兩欄自然落在正中間。
+ *
+ * ⚠️ 認的是我們自己掛的 `[data-landing-chip]`(`LANDING_CHIP`)與它的父層,
+ * 不是編譯類名。斷點的 768 同 `lib/media.ts` 的 `MOBILE_QUERY`(改一邊要改兩邊)。
+ */
+@media (max-width: 768px) {
+  [role='group']:has(> [data-landing-chip]) {
+    display: flex;
+    flex-wrap: wrap;
+    width: 100%;
+  }
+  [data-landing-chip] {
+    /* gap 是 --spacing-1,兩欄之間只有一個,所以各扣一半 */
+    flex: 1 1 calc(50% - var(--spacing-1) / 2);
+    min-width: 0;
+  }
+}
+
+/*
+ * 直的 `ResizeHandle`(檔案欄 / AskME 欄那兩根)的**命中區補位**。
+ *
+ * 症狀:不補的話,面板中線以下拖不動。
+ *
+ * 設計系統那顆命中區同時吃到 `inset-block: 0`(於是高度撐滿)
+ * 與 `translate(…, -50%)`(那是給「`top: 50%` 再往回拉一半」用的)。兩個湊在一起
+ * 就是**整條往上跑半個高度**,能拖的只剩上半。
+ * 這裡把它改回「`top: 50%` + 自己 100% 高」,讓那個 -50% 的位移變成正確的置中;
+ * 水平那一半的位移原封不動(它是對的)。
+ *
+ * ⚠️ 認的是 ARIA 屬性不是編譯類名。`aria-orientation="vertical"` = 這根線是直的
+ * (設計系統內部把它叫 horizontal,因為它調的是水平寬度)—— 橫的那種沒有這個問題,
+ * 不要一起改到。升級 `@astryxdesign/core` 之後要回來確認這條還需不需要。
+ *
+ * ⚠️ **只挑第一個子元素**(= 命中區)。把手底下有兩顆:命中區與那顆短握把
+ * (`.astryx-resize-handle-pill`,`height: var(--spacing-8)`)。寫成 `> *` 的話握把也會被
+ * 改成滿高,滑過去就從一小段變成整條線。
+ * ⚠️ 影響範圍是**全站的直向把手**:`/ssh` 的檔案欄與 AskME 欄,還有對話頁的檔案預覽欄
+ * (`pages/Chat.tsx` 的 `ResizeHandle direction="horizontal"`)—— 它們吃到的是同一個
+ * 設計系統缺陷,一起修好是對的,但改這條之前三根都要看過。
+ */
+.astryx-resize-handle[aria-orientation='vertical'] > :first-child {
+  inset-block-start: 50%;
+  inset-block-end: auto;
+  height: 100%;
+}
+
+/*
+ * ═══════════════════════════════════════════════════════════════════════
+ * 「東西出現」的進場,全部走 transition + `@starting-style`
+ * ═══════════════════════════════════════════════════════════════════════
+ *
+ * 為什麼不用 keyframes:keyframes 不能中斷 —— 連掛好幾個檔案時通知卡是**連續**插進來的,
+ * 送出時整疊又是一次被清空;transition 遇到中途改狀態會從當下的值接著走,keyframes 會
+ * 從頭重播。`@starting-style` 給的是「元素剛掛上來那一幀」的值,瀏覽器從那裡 transition
+ * 到正常值,不需要 JS 排 rAF 去翻 data 屬性(排 rAF 在背景分頁會整個不跑)。
+ *
+ * ⚠️ StyleX 寫不出 `@starting-style`,所以這幾條住在這裡,元件用 data 屬性來認。
+ * ⚠️ 位移一律走 `translate` / `scale` 不走 `transform`:SideNav 底下有規則會贏過 transform
+ *(見 `[role=menuitem]` 那段),而且 translate 與 scale 各自 transition 互不干擾。
+ * ⚠️ reduced-motion:只留 opacity,位移與縮放**不做**(不是做快一點)—— 見最底下那條。
+ *
+ * ── 附件通知(`pages/Chat.tsx` 的 noticeStack)──
+ * 從視窗下面浮上來 + 淡入,`--duration-medium-min`(225ms)。
+ * 退場由 hook 在 TTL 前 225ms 掛上 `data-leaving`(`useComposerAttachments.ts` 的
+ * NOTICE_EXIT_MS —— 那個數要跟這裡的時間同一階),淡出並往上收一點點。
+ * 幅度 24px(`--spacing-6`):再大的話對 236px 寬的卡太大,像是從別的地方飛來。
+ */
+[data-notice] {
+  opacity: 1;
+  translate: 0 0;
+  transition-property: opacity, translate;
+  transition-duration: var(--duration-medium-min);
+  transition-timing-function: var(--ease-standard);
+}
+@starting-style {
+  [data-notice] {
+    opacity: 0;
+    translate: 0 var(--spacing-6);
+  }
+}
+[data-notice][data-leaving] {
+  opacity: 0;
+  translate: 0 calc(var(--spacing-1) * -1);
+}
+/*
+ * 全站提示那一疊重新排到 top layer 最上面的那一下(`NoticeStack.tsx` 的 `promote`)。
+ * hide → show 會讓已經在畫面上的卡被當成新出現、重演一次進場;關掉過場,卡就原地不動。
+ */
+[data-notice-snap] [data-notice] {
+  transition: none;
+}
+
+/*
+ * ── 挑選器的格子(`components/pickerSwatch.ts` 的 `PICKER_SWATCH`)──
+ * 平常沒有底色、選中的那一格外面畫一圈、
+ * 滑過用跟選單項目一樣的漂浮框(`data-hover-lift="pill"` 給底色 + 影子)。
+ * - **不浮起**:選單裡的項目滑過不位移(見檔頭「側邊欄的列不浮」那段),同一個選單裡的格子也一樣。
+ * - 外圈畫在**圖示 / 圓點本身**(svg),不是整顆按鈕:
+ *   按鈕的方框是滑過時漂浮框的位置,兩件事分開才不會疊成兩層框。
+ *   粗細 = 兩倍的 `--border-width`,顏色跟字同一個 token,深淺色都看得到。
+ */
+[data-picker-swatch] {
+  --row-float: 0px;
+}
+[data-picker-swatch][aria-pressed='true'] svg {
+  outline: calc(var(--border-width) * 2) solid var(--color-text-primary);
+  outline-offset: calc(var(--border-width) * 2);
+  border-radius: var(--radius-full);
+}
+
+/*
+ * ── 挑選器「更多顏色 / 更多圖示」展開的那一格(`ColorPicker` / `FolderIconPicker`)──
+ * 從上緣長出來:淡入 + 0.96 → 1 + 往下 4px,`--duration-fast-max`(165ms)。
+ * ⚠️ **不做 stagger**:那是一次挑一個的挑選器,逐格跳出來只是讓人等。
+ *
+ * ── MFA 的 QR code(`IssueMfaDialog`)──
+ * 同一套,時間放到 `--duration-medium-min`(225ms):一個帳號只會看到一次。
+ * ⚠️ 它只管「QR 在原地冒出來」—— 對話框的高度不是它管的(淡入蓋不住版面撐開)。
+ * QR 的 200×200 位置在拿到回應時就用骨架留好,高度差交給 `AutoHeight`。
+ */
+[data-picker-more],
+[data-qr-reveal] {
+  transform-origin: top;
+  opacity: 1;
+  scale: 1;
+  translate: 0 0;
+  transition-property: opacity, scale, translate;
+  transition-timing-function: var(--ease-standard);
+}
+[data-picker-more] {
+  transition-duration: var(--duration-fast-max);
+}
+[data-qr-reveal] {
+  transition-duration: var(--duration-medium-min);
+}
+@starting-style {
+  [data-picker-more],
+  [data-qr-reveal] {
+    opacity: 0;
+    scale: 0.96;
+    translate: 0 calc(var(--spacing-1) * -1);
+  }
+}
+
+/*
+ * ── 兩塊「要人回答」的紅底(`FilePanel`)──
+ * 上傳中 / 撞名的那幾列(`data-upload-row`)與刪除確認列(`data-ask-row`)。
+ * 進場同挑選器那套(淡入 + 從上方 8px 落下,`--duration-fast-max`)。
+ *
+ * 兩塊共用同一份 `styles.ask`(`FilePanel.tsx` 的 `ask`),所以進場也共用這一條。
+ * 為什麼是 transition 不是 keyframes:多檔同時丟進來時列是一筆一筆插進來的,
+ * 而刪除確認那塊會在原地從「刪除 N 個項目?」換成錯誤訊息(`confirmError`)——
+ * 兩種都是進場還沒演完就改狀態,transition 才 retarget 得了。
+ *
+ * ⚠️ 刪除確認列是 flex 流裡的**實體項目**(插在路徑列與清單之間),
+ * 它一出現底下整份清單就會往下掉 —— 進場的意義就是不讓那份清單瞬移
+ *(人這時候正在核對自己選了哪幾個)。
+ * 退場**不做**:列消失的時機是上傳完成、按「知道了」/「取消」、或刪完了,
+ * 四種都是人正盯著的結果,留一段淡出只是讓他等。
+ */
+[data-upload-row],
+[data-ask-row] {
+  opacity: 1;
+  translate: 0 0;
+  transition-property: opacity, translate;
+  transition-duration: var(--duration-fast-max);
+  transition-timing-function: var(--ease-standard);
+}
+@starting-style {
+  [data-upload-row],
+  [data-ask-row] {
+    opacity: 0;
+    translate: 0 calc(var(--spacing-2) * -1);
+  }
+}
+
+/*
+ * ── 拖曳分頁時的落點圖層(`pages/Terminal.tsx` 的 zones)──
+ * 開始拖的那一刻整層淡入,`--duration-fast`(125ms)。五塊虛線框一起憑空蓋上來太突兀,
+ * 而拖曳已經開始了,不能慢 —— 手正在動。
+ *
+ * ⚠️ **退場刻意不做**,兩個理由(跟 `[data-upload-row]` 的退場是同一個判斷):
+ *  1. 這一層會把終端機的滑鼠吃掉。要淡出就得讓它多留在 DOM 裡幾百毫秒,
+ *     那段時間終端機是點不到的 —— 為了一個淡出換來一段點不動,不划算。
+ *  2. 放開滑鼠那一刻畫面**立刻變成分割好的樣子**,那是系統在回應剛做完的決定,
+ *     本來就該乾脆。
+ * 也就是說:進場補幀、退場瞬間收掉,是刻意的不對稱。
+ *
+ * ⚠️ 只做 opacity,不做位移或縮放:這一層鋪滿整個終端機區,任何縮放都會讓五塊框
+ * 在正確位置之外先畫一次,看起來像框錯了地方。所以**不必**列進底下那個
+ * reduced-motion 區塊 —— 它沒有位移要拿掉。
+ */
+[data-drop-zones] {
+  opacity: 1;
+  transition-property: opacity;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: var(--ease-standard);
+}
+@starting-style {
+  [data-drop-zones] {
+    opacity: 0;
+  }
+}
+
+/*
+ * ── three.js 的 canvas(`loading-scene.ts` / `LoginScene.tsx`)──
+ * 分包載完之後 canvas 是直接 append 進去的,硬切一下。淡入 `--duration-medium-min`
+ *(225ms):比進場那幾條慢一階,因為它蓋的是一整塊面積而不是一張卡。
+ * 只動 opacity —— 底下是 WebGL,位移會讓整塊重新合成。
+ * ⚠️ 兩支場景都要**先畫一格再淡**,不然淡入的前半段是一塊空的 canvas,等於把問題延長了。
+ *    兩邊的寫法**不一樣**:`loading-scene.ts` 是 `frame(performance.now())`(它的迴圈自己排下一支),
+ *    `LoginScene.tsx` 是 `handle.update(0, pointer)`(時間點固定 0,跟它 reduced-motion 補畫那一格一致)。
+ */
+[data-scene-fade] {
+  opacity: 1;
+  transition-property: opacity;
+  transition-duration: var(--duration-medium-min);
+  transition-timing-function: var(--ease-standard);
+}
+@starting-style {
+  [data-scene-fade] {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-notice],
+  [data-notice][data-leaving],
+  [data-picker-more],
+  [data-qr-reveal],
+  [data-upload-row],
+  [data-ask-row],
+  /*
+   * ⚠️ 列在這裡對它是 **no-op**:它本來就只動 opacity、沒有 translate / scale 可以拿掉。
+   * 留著是因為「這一族有沒有被想過」比「規則有沒有作用」重要 ——
+   * 但**這份清單不是完整名單**:`[data-drop-zones]` 刻意沒列(理由寫在它自己那一段)、
+   * `[data-term-panel]` 有自己的 `and (prefers-reduced-motion: reduce)` 區塊。
+   */
+  [data-scene-fade] {
+    transition-property: opacity;
+    translate: none;
+    scale: none;
+  }
+  /*
+   * ⚠️ `[data-leaving]` 要**另外列在上面**:它自己那條(0,2,0)比這裡的 `[data-notice]`
+   *(0,1,0)特異性高,不列的話退場那 4px 仍會套上、而 transition 只剩 opacity —— 瞬跳。
+   */
+}
+
+/*
+ * ── 按住才刪除(`components/terminal/FilePanel.tsx` 的刪除確認)──
+ *
+ * 遠端主機上的刪除沒有回收桶,一次點擊太容易手滑;按住的時候一條底色從左往右
+ * 填滿,填滿那一刻才真的送出。填滿走 `clip-path: inset(0 100% 0 0) → inset(0)`,
+ * 時間是 `--hold-ms`(元件用 inline style 給,跟 JS 的計時器同一個數);
+ * 中途放開就取消,底色用 `--duration-fast-max` + `--ease-standard` 彈回去 ——
+ * 慢的那一趟是人在做決定,快的那一趟是系統在回應。
+ *
+ * 顏色是 `--color-overlay-pressed`:設計系統給「壓著」用的那層,疊在紅鈕上就是深一階。
+ * reduced-motion:不掃過去,改成整條底色分三階亮起來(`steps`)—— 進度還在,只是不會動。
+ */
+[data-hold-fill] {
+  position: relative;
+}
+[data-hold-fill] > [data-hold-fill-bar] {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: var(--radius-element);
+  background-color: var(--color-overlay-pressed);
+  clip-path: inset(0 100% 0 0);
+  transition: clip-path var(--duration-fast-max) var(--ease-standard);
+}
+[data-hold-fill][data-holding] > [data-hold-fill-bar] {
+  clip-path: inset(0 0 0 0);
+  transition: clip-path var(--hold-ms) linear;
+}
+/*
+ * 按**滿**的那一刻(成功送出)**不是**取消:底色不回捲,停在滿的位置淡出。
+ * 一來一回同一段的話,辛苦按滿 1.5 秒跟手滑放開長得一模一樣。
+ * `--duration-fast`(125ms)比取消的 `--duration-fast-max`(165ms)再快一階 ——
+ * 這一趟純粹是系統在回應(同上面那段註解的原則)。
+ * ⚠️ 特異性跟上面那條 `[data-hold-fill][data-holding]` 一樣,**靠順序贏**,不要搬走。
+ */
+[data-hold-fill][data-hold-done] > [data-hold-fill-bar] {
+  clip-path: inset(0);
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-standard);
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-hold-fill] > [data-hold-fill-bar] {
+    clip-path: inset(0);
+    opacity: 0;
+    transition: opacity var(--duration-fast-max) var(--ease-standard);
+  }
+  [data-hold-fill][data-holding] > [data-hold-fill-bar] {
+    opacity: 1;
+    transition: opacity var(--hold-ms) steps(3, end);
+  }
+  /* 成功這一趟本來就只有 opacity,照樣淡出 —— reduced-motion 要拿掉的是位移,不是回饋。 */
+  [data-hold-fill][data-hold-done] > [data-hold-fill-bar] {
+    opacity: 0;
+    transition: opacity var(--duration-fast) var(--ease-standard);
+  }
+}
+
+/*
+ * ── 終端機的側欄在手機上是**蓋滿畫面的抽屜**(`TerminalSession` 的 `styles.panel`)──
+ *
+ * 同一塊在桌機是一欄 flex 成員(那邊只做淡入,走設計系統的 `useEntryAnimation`,
+ * 見 `TerminalSession.tsx` —— 桌機動寬度會讓 xterm 每幀重折行);在手機是
+ * `position: absolute; inset: 0` 的全螢幕抽屜,零動作出現的話看不出它從哪裡來。
+ * 時間用 `--duration-medium`(300ms)—— drawer 的預算是 200–500ms,
+ * 而且跟側邊欄那個抽屜(`.astryx-mobile-nav`)同一個數、同一條曲線。
+ *
+ * ⚠️ 這裡可以用 `@starting-style`,側邊欄那個抽屜不行 —— 兩者不是同一種情況:
+ * 那邊的面板是從**外層 dialog 的 `display: none`** 底下現身的(面板自己的 display
+ * 從頭到尾沒變過,所以拿不到起始樣式那一幀);這兩塊是 React 條件渲染,
+ * 元素是**真的剛插進 DOM**,`@starting-style` 正是給這個用的。
+ * ⚠️ 位移走 `translate` 不走 `transform`(同這個檔案其他幾條進場的慣例)。
+ * ⚠️ 退場**不做**:React 一 unmount 就從 DOM 拔掉,沒有地方掛
+ *(同 `[data-upload-row]` 那段的判斷)。
+ * ⚠️ `data-term-panel` 的值是面板在**哪一側**:檔案欄 `start`、AskME `end`。
+ * ⚠️ 這是 `768` 這個斷點的其中一份(**完整清單在 `lib/media.ts` 的 `MOBILE_QUERY` 上面**)
+ * —— 不要在這裡另外數一個總數。
+ */
+@media (max-width: 768px) {
+  [data-term-panel] {
+    opacity: 1;
+    translate: 0 0;
+    transition-property: opacity, translate;
+    transition-duration: var(--duration-medium);
+    transition-timing-function: var(--ease-standard);
+    /*
+     * ⚠️ **把設計系統那支淡入的 duration 蓋成跟滑入同一個 300ms。**
+     *
+     * 元件那邊 `useEntryAnimation('fadeIn')` 是**無條件**掛著的(兩個斷點都掛),
+     * 它預設 165ms —— 不對齊的話手機上會變成「淡入先結束、再滑 135ms」。
+     * 蓋得掉是因為 StyleX 的規則在 `@layer priority4`,而這個檔案沒有 layer,
+     * 沒有 layer 的作者樣式贏過任何 layer 裡的。
+     *
+     * 🚨 **判斷要放在這裡,不要放進 React 的狀態裡。** 在元件裡寫
+     * `isMobilePanel ? null : panelEntry` 的話,**面板開著時跨過 768px 拉寬,
+     * opacity 會掉到 0 再淡回來**:進場動畫是掛載時
+     * 跑一次的東西,綁在一個元素活著時會變的值上,class 一被加上去就從頭重演。
+     * 媒體查詢跟版面是同一幀切換的,沒有這個問題。
+     */
+    animation-duration: var(--duration-medium);
+  }
+  @starting-style {
+    [data-term-panel='start'] {
+      opacity: 0;
+      translate: -100% 0;
+    }
+    [data-term-panel='end'] {
+      opacity: 0;
+      translate: 100% 0;
+    }
+  }
+}
+/* 減少動態:拿掉位移,淡入留著(更少更輕,不是歸零)。 */
+@media (max-width: 768px) and (prefers-reduced-motion: reduce) {
+  [data-term-panel] {
+    transition-property: opacity;
+    transition-duration: var(--duration-fast-max);
+    translate: none;
+  }
+}
+
+/*
+ * 載入畫面交棒給首屏的那一層。
+ *
+ * 要是兩個狀態**沒有重疊** —— `loading` 一變 false,
+ * 載入畫面在**同一個 commit** 裡被卸掉、應用在同一個 commit 裡掛上,
+ * 中間至少有一格是「底色 + 還沒畫完的首屏」,畫面會閃一下。沒有任何動畫可以補那一格,
+ * 因為要淡出的那個元素已經不在 DOM 裡了。
+ *
+ * 所以載入畫面留在一層 fixed 的蓋子裡(`App.tsx` 的 `BootHandoff`),
+ * 應用在底下先畫好,然後這層才淡掉 —— 兩邊真的疊著,交接就有東西可以過渡。
+ *
+ * ⚠️ 用 `[data-leaving]` 而不是 `@starting-style`:這是**離場**。
+ *   起始值(`opacity: 1`)必須在屬性被加上去**之前**就宣告好,
+ *   不然瀏覽器沒有可以內插的前一個值,會直接跳掉(同 `[data-notice]` 那幾族)。
+ * 改這裡的 duration **不必動 JS**:`App.tsx` 的 `BootHandoff` 用 `lib/transitionMs.ts` 去量這條規則本人,
+ *   再決定什麼時候把這一層卸掉。
+ * ⚠️ 這裡**不配 `prefers-reduced-motion`**:整段只有 opacity,沒有位移也沒有縮放,
+ *   純交叉淡入本來就是「減少動態」建議拿來取代位移的那個做法。
+ *   要再輕的話是縮短 duration,不是拿掉 —— 拿掉就會回到閃一下。
+ */
+[data-handoff-layer] {
+  opacity: 1;
+  transition-property: opacity;
+  transition-duration: var(--duration-medium);
+  transition-timing-function: var(--ease-standard);
+}
+[data-handoff-layer][data-leaving] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/*
+ * 拖曳的放置目標亮起來(側邊欄的資料夾 / Personal / 對話列)。
+ *
+ * ⚠️ **這一條不在 StyleX 裡是有原因的**(效能):那個屬性是
+ * `Sidebar.tsx` 的 `paintDropOver` 在拖曳中**直接掛上去的**,不走 React ——
+ * 走 React 的話拖過清單時每經過一列就是一次整棵側邊欄重繪,一連串 long task。
+ * StyleX 的 class 是 render 時決定的,搭不上這條路。
+ *
+ * 外框的骨架(粗細、offset、
+ * 透明的底)仍然在 `Sidebar.tsx` 的 `styles.dropTarget` 上,這裡只把顏色打開。
+ * ⚠️ 選擇器不必加 `!important`:StyleX 的規則包在 `@layer` 裡,
+ * 而沒有 layer 的規則一律壓得過有 layer 的。
+ */
+[data-drop-over] {
+  outline-color: var(--color-accent);
+  background-color: var(--color-accent-muted);
+}
+
+/*
+ * 筆記頁左側清單的拖曳落點(`components/notes/NoteTree.tsx` 的 `paint`,一樣直接掛屬性不走 React)。
+ * 跟上面同一組顏色;筆記多了「排在前面 / 後面」—— 那兩種是一條線,放在中間(變成子頁)才是整列亮起來。
+ */
+.astryx-side-nav-item[data-note-drop='inside'] {
+  outline: calc(var(--focus-outline-width) / 2) var(--focus-outline-style) var(--color-accent);
+  outline-offset: calc(var(--focus-outline-width) / -2);
+  background-color: var(--color-accent-muted);
+}
+.astryx-side-nav-item[data-note-drop='before'] {
+  box-shadow: inset 0 calc(var(--border-width) * 2) 0 0 var(--color-accent);
+}
+.astryx-side-nav-item[data-note-drop='after'] {
+  box-shadow: inset 0 calc(var(--border-width) * -2) 0 0 var(--color-accent);
+}
+
+/*
+ * 收合按下去之後、React 還沒跟上的那兩幀(`Sidebar.tsx` 的 `COLLAPSE_PENDING`)。
+ *
+ * 為什麼需要它:click 是 discrete 事件,React 會同步把整個側邊欄重算完
+ * 才交還給瀏覽器 —— 按下去到 DOM 真的動之間會停一下,看起來像 lag。把 rail 的寬度
+ * 先套上去,這一個 task 就很短,過場當場開始跑。
+ *
+ * ⚠️ **`!important` 在這裡是必要的**:`<nav>` 的寬度是 React 用 **inline style**
+ * 寫的(`navWidthStyle`),而 inline 壓得過任何選擇器 —— 這是唯一蓋得掉它的辦法。
+ * 屬性一拿掉就自動交還給 React,不必去改它的 inline style(改了才真的會打架:
+ * React 只在那個 prop 真的變了的時候才會重寫)。
+ *
+ * ⚠️ 上面那三條 `[data-animating]`(夾字、捲軸預留位、`contain`)也要一起認它,
+ * 不然那兩幀裡字會先斷行再收回去。
+ */
+.astryx-side-nav[data-collapse-pending] {
+  width: var(--spacing-12) !important;
+}
+
+/*
+ * 表頭的排序箭頭:**還沒排序的欄位平常不顯示**,滑鼠移上去(或鍵盤移到)才出現;
+ * 點下去排序之後只剩那一欄的 ↑ 或 ↓。
+ * Astryx 的預設是未排序的箭頭一直半透明(35%)掛著。
+ * 用法:在包表格的元素上加 `data-sort-on-hover`(`components/tableKit.ts` 的 `wrapProps` 會帶)。
+ * 已排序的欄位 <th> 有 aria-sort,這裡只動沒有 aria-sort 的那幾欄。
+ * ⚠️ 勾選框那一格(全選)的表頭也是沒有 aria-sort 的 <th>,裡面的勾也是 svg ——
+ * 不排除的話「全選」勾起來只看到一個黑框、沒有勾,所以跳過有勾選框的那一格。
+ */
+[data-sort-on-hover] th:not([aria-sort]):not(:has(input[type='checkbox'])) svg {
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-standard);
+}
+[data-sort-on-hover] th:not([aria-sort]):not(:has(input[type='checkbox'])) :focus-visible svg {
+  opacity: 1;
+}
+/* 滑過才出現只給有滑鼠的裝置:觸控點一下表頭就排序了,假 :hover 黏住只會讓箭頭一直掛著 */
+@media (hover: hover) and (pointer: fine) {
+  [data-sort-on-hover] th:not([aria-sort]):not(:has(input[type='checkbox'])):hover svg {
+    opacity: 1;
+  }
+}
+
+/*
+ * 欄寬拖拉的分界線(`tableKit` 的資料表):**平常就畫在表頭**,讓人知道哪裡可以拖。
+ * - Astryx 的拖把放在表頭格子的文字那一層裡,離真正的欄位邊界差一個內距(--spacing-3)——
+ *   往外推回邊界,線才會對在兩欄的交界上。
+ * - 平常是淡的分隔線顏色;滑鼠移上去 / 鍵盤移到時,照 Astryx 原本的樣子變成強調色,
+ *   拖的時候外掛直接在元素上寫強調色(inline,會蓋過這裡)。
+ * 用法:在包表格的元素上加 `data-col-resize-lines`。
+ * ⚠️ 只有**可排序**的表頭才有「文字那一層」(排序鈕);不能排序的表頭,拖把直接在格子裡、
+ *   本來就在邊界上 —— 再往外推 12px 會跑進下一欄、緊貼下一欄的標題字。
+ */
+[data-col-resize-lines] th:has(button) [role='separator'] {
+  inset-inline-end: calc(var(--spacing-3) * -1);
+}
+[data-col-resize-lines] th [role='separator']:not(:hover):not(:focus-visible) {
+  --indicator-color: var(--color-border-emphasized);
+}
+
+/*
+ * Work Flow 的紅色「刪除」(拼圖右鍵的刪除圖示、選到線時線上方那顆 X)。
+ * ⚠️ 這個佈景的 `.astryx-button.destructive` 把**字**設成 --color-error,元件畫出來的底
+ * 也是 --color-error(淺色 #a50c25)→ 紅底紅字、完全看不到字。
+ * 只在這兩條工具列裡把字改回反白(佈景給的 --color-on-error:淺色白字、深色深字),不動全站的按鈕。
+ * 選擇器認 `data-variant`,不認 `.destructive` 這種 bare class —— Astryx 已把後者標為棄用,
+ * 升級時這條才不會安靜失效。
+ */
+[data-node-bar] .astryx-button[data-variant='destructive'],
+[data-edge-bar] .astryx-button[data-variant='destructive'] {
+  color: var(--color-on-error);
+}
+
+/*
+ * 設計系統內建的鍵盤提示(「← → to navigate」)**不畫**:畫面上不放說明文字。
+ * 用鍵盤 Tab 進 Toolbar(SSH 頁籤列、檔案欄、AI 面板、檔案預覽)、SegmentedControl(帳號管理的「不分組 /
+ * 依職務」⋯⋯)、TabList 時,它會冒在底下兩秒。三個元件都沒開放關掉它的 prop
+ * (底層 useKeyboardHint 有 enabled,沒往外傳),所以只能在這裡藏。
+ * 選擇器是「裡面有 <kbd> 的浮層」:設計系統裡會用 <kbd> 的只有這個提示,另外一處 CommandPaletteFooter 我們沒用
+ * (升級設計系統時要重新確認)。方向鍵本身的操作不受影響,只是不顯示那行字。
+ * `!important`:不支援 Popover API 的瀏覽器上,設計系統是用**行內** `display: block` 把它打開的
+ * (`useLayer.tsx` 的退路),不加蓋不過行內樣式。
+ */
+[popover]:has(kbd) {
+  display: none !important;
+}
+
+/*
+ * SSH 選連線的兩段過場(View Transitions;觸發在 `components/terminal/morph.ts`)。
+ * 1. 主機卡片 ↔ 方框:`host-card`(外框)與 `host-logo`(logo)。每次點卡片都會看到 → 快,起步快、收尾慢。
+ * 2. 方框 → 黑底終端機(<html class="vt-terminal"> 那一次):連上才一次 → 可以慢一點(⚠️ 只有**第一次**:
+ *    終端機畫過之後斷線再按 Enter 重連,不再回方框、不打勾、不長,見 TerminalSession);方框長滿視窗用 ease-in-out,
+ *    整片(root)同一段時間從淺淡到深,不要突然換成黑底。
+ *    方框與終端機交疊時加一點模糊:看起來是同一個東西變過去,不是兩張畫面疊著。
+ * 減少動態時 `morph()` 直接換畫面,不會走到這裡。
+ */
+::view-transition-group(host-card),
+::view-transition-group(host-logo) {
+  animation-duration: 340ms;
+  animation-timing-function: var(--ease-panel);
+}
+html.vt-terminal::view-transition-group(*) {
+  animation-duration: 620ms;
+  animation-timing-function: var(--ease-morph);
+}
+html.vt-terminal::view-transition-old(root) {
+  animation: vt-terminal-out 620ms var(--ease-morph) both;
+}
+html.vt-terminal::view-transition-new(root) {
+  animation: vt-terminal-in 620ms var(--ease-morph) both;
+}
+html.vt-terminal::view-transition-old(host-card) {
+  animation: vt-terminal-blur-out 620ms var(--ease-morph) both;
+}
+html.vt-terminal::view-transition-new(host-card) {
+  animation: vt-terminal-blur-in 620ms var(--ease-morph) both;
+}
+html.vt-terminal::view-transition-old(host-logo) {
+  animation: vt-terminal-blur-out 300ms ease-out both;
+}
+@keyframes vt-terminal-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes vt-terminal-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes vt-terminal-blur-out {
+  to {
+    opacity: 0;
+    filter: blur(6px);
+  }
+}
+@keyframes vt-terminal-blur-in {
+  from {
+    opacity: 0;
+    filter: blur(6px);
+  }
+}
+
+/*
+ * ── New chat ↔ 對話的過場(`lib/chatTransition.ts`)──
+ * 不要回彈。曲線用 `--ease-standard`(起步快、尾巴長長地收住),跟站上其他動作同一條;
+ * 移動距離 600 多 px,所以 450ms。
+ *
+ * - root(招呼語 / 訊息串 / 側邊欄):**原地**交叉淡化,跟輸入框同一條曲線。
+ *   用瀏覽器預設的 root 淡入淡出(兩張快照 `plus-lighter` 疊加),兩邊一樣的像素(側邊欄)疊起來還是一樣,
+ *   不會糊;只有不一樣的地方(招呼語 ↔ 訊息串、側邊欄的選取列)在淡。
+ *   ⚠️ 新舊兩張要**同一個時間、同一條曲線、不延遲** —— plus-lighter 靠「舊 = 1 − f(t)、新 = f(t)」加起來剛好 1,
+ *   錯開的話一樣的地方會暗一下。
+ *   ⚠️ 招呼語 / 訊息串不要另外取 view-transition-name 成一組:瀏覽器會把舊的訊息串(很高、捲到底)
+ *   縮放著搬到新位置,又是另一種節奏,跟輸入框疊在一起看起來很亂。
+ * - composer:位置與寬高補間(置中 720 ↔ 釘底 800)。新舊兩張快照**不拉伸**、**置中靠下**,
+ *   舊的 120ms 淡掉、新的晚 60ms 出來,外框撐開時把它「露」出來 ——
+ *   ⚠️ 兩張一起交叉淡化的話,半路上送出鈕會出現兩顆、字有重影。
+ *   置中:外框是左右對稱地長,快照釘左的話新的那張右半截要等框長完才露出來,
+ *   看起來是往右長;要的是由中心向左右兩邊長。
+ *   `overflow: clip` + 圓角:新快照比外框寬時,多出來的那截要被裁掉,不能露在框外。
+ * 減少動態:`morph()` 根本不起過場,直接換頁,這裡不用另外寫。
+ */
+html.vt-chat::view-transition-old(root),
+html.vt-chat::view-transition-new(root) {
+  animation-duration: 300ms;
+  animation-timing-function: var(--ease-standard);
+}
+html.vt-chat::view-transition-group(composer) {
+  animation-duration: 450ms;
+  animation-timing-function: var(--ease-standard);
+  overflow: clip;
+  border-radius: var(--radius-chat, 24px);
+}
+html.vt-chat::view-transition-old(composer),
+html.vt-chat::view-transition-new(composer) {
+  height: 100%;
+  object-fit: none;
+  object-position: center bottom;
+}
+html.vt-chat::view-transition-old(composer) {
+  animation: 120ms var(--ease-standard) both vt-chat-fade-out;
+}
+html.vt-chat::view-transition-new(composer) {
+  animation: 200ms var(--ease-standard) 60ms both vt-chat-fade-in;
+}
+
+/*
+ * ── 換功能頁:側邊欄那塊會滑的選取底色(`lib/pageSwap.ts`、`Sidebar.tsx` 的 `SelectionPill`)──
+ * 它在的時候,那一列自己的選取底色讓掉,不然滑的半路上看得到兩塊。只在它真的量到那一列時才生效
+ *(根節點的 `data-selection-pill`)。強制色彩模式不讓:那塊不畫,選取態交還給導覽列自己的 Highlight。
+ */
+@media not (forced-colors: active) {
+  [data-selection-pill] .astryx-side-nav-item[aria-current='page'] {
+    background-color: transparent;
+  }
+}
+
+/*
+ * 對話區預留捲軸那條槽。歷史載入、訊息串長到要捲的那一刻,Windows 的捲軸(約 15px)
+ * 會把釘底的輸入框往左擠半條、寬度也少一條 —— 剛演完過場就又動一下。
+ * 空白頁那一層(`Chat.tsx` 的 `landingScroll`)也留同一條,兩種版面的中線才對得齊,過場不會多一段橫移。
+ * 代價跟側邊欄那條一樣:沒捲軸時右邊固定空一條(見上面「捲軸出現時不要把內容往內擠」)。
+ */
+.astryx-chat-layout {
+  scrollbar-gutter: stable;
+}
+@keyframes vt-chat-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes vt-chat-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/*
+ * 換淺色 / 深色時整頁淡過去(觸發在 `lib/theme.ts` 的 `applyWithFade`)。
+ * 只在 <html class="vt-theme"> 那一次生效,不碰上面 SSH 那段(`vt-terminal`、`host-card`)的節奏。
+ * 瀏覽器預設的 root 交叉淡入本來就只有 opacity,這裡只把時間與曲線換成 token(約 200ms)。
+ * ⚠️ 不配 `prefers-reduced-motion`:只動 opacity,硬切的整頁亮度跳才是要避免的那種突兀。
+ */
+html.vt-theme::view-transition-old(root),
+html.vt-theme::view-transition-new(root) {
+  animation-duration: var(--duration-medium-min);
+  animation-timing-function: var(--ease-standard);
+}
+
+/*
+ * 系統開了「減少透明度」:毛玻璃換成實心。
+ * - 對話框的遮罩:設計系統畫的是 `--color-overlay` + `blur(2px)`;拿掉模糊、遮罩再暗一點,
+ *   背景不再透出來搶注意力。`--color-overlay` 兩個佈景都是黑色半透明,混黑色只會加不透明度、不改色相。
+ *   `dialog[open]::backdrop`(0,1,2)才壓得過設計系統的單一 class。
+ * - 問答頁輸入框後面那層毛玻璃(設計系統 `ChatLayout` 的 blurLayer,沒有對外的名字):
+ *   它是 dockContainer(`.astryx-chat-layout` 的最後一個直接子層)裡**倒數第二個**
+ *   ——最後一個是放輸入框的 dock,前面可能還有「捲到底」那顆鈕。
+ *   換成訊息區的白底;上緣那段漸層遮罩留著,訊息仍然是淡進去的,不是被一刀切掉。
+ */
+@media (prefers-reduced-transparency: reduce) {
+  dialog[open]::backdrop {
+    backdrop-filter: none;
+    background-color: color-mix(in srgb, var(--color-overlay) 70%, black);
+  }
+  .astryx-chat-layout > :last-child > :nth-last-child(2) {
+    backdrop-filter: none;
+    background-color: var(--color-background-surface);
+  }
+}
+
+/*
+ * 系統要求「提高對比」:浮在頁面上的面板(對話框、選單)
+ * 只靠影子跟底色分開,高對比模式下要有一圈看得見的框。用 `outline`(往內縮一條)不用 `border`,
+ * 不會改到排版;顏色用 `--input-line`(輸入框靜止框線那一份,比 `--color-border-emphasized` 深,理由見 `:root`)。
+ * 選單認 `[role=menu]` 本人:底色、圓角都畫在它身上(外層的 popover 是透明的),框也跟著它的 morph 一起長。
+ */
+@media (prefers-contrast: more) {
+  dialog[data-app-dialog],
+  [role='menu'] {
+    outline: var(--border-width) solid var(--input-line);
+    outline-offset: calc(var(--border-width) * -1);
+  }
+}

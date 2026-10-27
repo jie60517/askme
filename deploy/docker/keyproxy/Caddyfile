@@ -1,0 +1,21 @@
+# 金鑰代理:askme 容器裡的 claude 把請求送到這裡(ANTHROPIC_BASE_URL=http://keyproxy:8080),
+# 這裡把真正的 API key 補進標頭再轉給 Anthropic。
+#
+# 為什麼要多這一層:askme 容器裡跑的是 AI,full 帳號還有 Bash —— key 放在 askme 的環境變數裡,
+# 叫 AI 跑一次 `env` 就拿到了,而答案還會存進資料庫。key 只在這個容器裡,askme 那邊只有一個假值。
+# (代價:AI 仍然可以透過這個代理呼叫 API,也就是「用得到、拿不走」。)
+{
+	admin off
+	auto_https off
+}
+
+:8080 {
+	reverse_proxy https://api.anthropic.com {
+		header_up Host api.anthropic.com
+		# 蓋掉 claude 送來的假值;用 Authorization 的另一種登入方式一律拿掉
+		header_up x-api-key {env.ANTHROPIC_API_KEY}
+		header_up -Authorization
+		# 串流回應(SSE)一收到就往回送,不攢
+		flush_interval -1
+	}
+}

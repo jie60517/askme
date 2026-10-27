@@ -1,0 +1,141 @@
+# AskME(內網一台主機)。在 deploy/docker 這個資料夾裡:
+#
+#   docker build -f deploy/docker/Dockerfile -t askme:local ../..   # 先建 image(在 repo 根目錄跑就把最後的 ../.. 換成 .)
+#   docker compose up -d                                           # 起 askme + postgres + keyproxy
+#
+# 旁邊要有三個檔(從 *.example 複製後填,步驟見 README.md):
+#   .env                  這份檔裡 ${...} 的值(image 版本、port、資料庫密碼、Claude 登入方式)
+#   askme.env             程式設定(管理員密碼、信任 IP…),由容器裡的 entrypoint.py 讀
+#   knowledge_bases.json  要回答哪個專案的問題
+#
+# 三個容器:
+#   askme     網站 + claude CLI。訂閱模式的登入存在它的 volume;**API key 不放這裡**(AI 有 Bash)
+#   keyproxy  apikey 模式:把 claude 的請求補上 API key 再轉給 Anthropic(key 只在這裡)
+#   postgres  資料庫,不對外開 port
+
+services:
+  askme:
+    # image 只由 `docker build` 產生,這裡刻意不寫 build: ——
+    # 寫了的話,退版時要的舊 image 若已被清掉,compose 會拿**現在的**程式碼
+    # 重建一個掛舊標籤的 image,看起來退版成功、其實沒退。
+    image: askme:${ASKME_TAG:-local}
+    pull_policy: never
+
+    # 內網直接連:預設綁所有網卡。只給這台主機自己用就把 .env 的 ASKME_BIND 改成 127.0.0.1。
+    ports:
+      - "${ASKME_BIND:-0.0.0.0}:${ASKME_PORT:-8100}:8100"
+
+    # 不用 env_file: —— compose 會展開值裡的 $,密碼裡有 $ 就會悄悄變成另一個值。
+    # askme.env 改成掛進去,由 entrypoint.py 關掉展開讀。
+    environment:
+      HOME: /home/askme
+      CLAUDE_BIN: /usr/local/bin/claude
+      KNOWLEDGE_BASES_FILE: /opt/askme/config/knowledge_bases.json
+      # knowledge_bases.json 某一筆的 workdir 不存在時退回這裡
+      CLAUDE_WORKDIR: /srv/projects/example
+      # projects/ 底下每個資料夾自動當成一個專案(放進去重新整理網頁就看得到)
+      WORKSPACE_DIR: /srv/projects
+      # 上傳與 AI 產出,放在 volume askme-data 裡
+      AGENT_KNOWLEDGE_DIR: /app/backend/data/agent-knowledge
+      DATABASE_URL: postgresql+psycopg://askme:${PG_PASSWORD:?.env 缺少 PG_PASSWORD}@postgres:5432/askme
+      # claude 用哪種登入:subscription(訂閱,容器裡 /login 一次)或 apikey(走 keyproxy)。
+      # ANTHROPIC_BASE_URL 與假 key 由 entrypoint.py 依這個值設,不寫在這裡(理由見那支)
+      CLAUDE_AUTH: ${CLAUDE_AUTH:-subscription}
+      # 不送遙測、不檢查更新這類非必要連線
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+
+    volumes:
+      # claude 的訂閱登入、session 與使用者層設定。升級 image 不用重登就靠它
+      - claude-home:/home/askme
+      # 上傳檔、AI 產出檔與其他執行期資料
+      - askme-data:/app/backend/data
+      # 要問的專案(原始碼、文件、各專案的 CLAUDE.md),唯讀。容器裡一律看成 /srv/projects
+      - ${PROJECTS_DIR:-./projects}:/srv/projects:ro
+      - ./askme.env:/run/askme/askme.env:ro
+      - ./knowledge_bases.json:/opt/askme/config/knowledge_bases.json:ro
+      # SSH 終端機用的金鑰與 known_hosts(不用 SSH 終端機就放著空資料夾)
+      - ./ssh:/opt/askme/ssh:ro
+
+    # SSH 終端機要連「跑 Docker 的這台主機」時,askme.env 填 SSH_TERMINAL_HOST=host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    depends_on:
+      postgres:
+        # 啟動時就會建表,資料庫還沒好就會直接退出
+        condition: service_healthy
+      keyproxy:
+        condition: service_started
+
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8100/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    restart: unless-stopped
+    # 讓進行中的問答有時間收尾
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  keyproxy:
+    # CLAUDE_AUTH=subscription 時用不到它,但照樣起(很小),切到 apikey 只要改 .env 重啟 askme
+    image: caddy:2.8.4-alpine
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    volumes:
+      - ./keyproxy/Caddyfile:/etc/caddy/Caddyfile:ro
+    # 不開 port:只有同一個網路裡的 askme 連得到
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # 官方 image 的 caddy 執行檔帶著 cap_net_bind_service 的檔案權限;
+    # 這一項不在容器的權限範圍內的話,連 exec 都會失敗(operation not permitted)
+    cap_add:
+      - NET_BIND_SERVICE
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  postgres:
+    image: ${PG_IMAGE:-postgres:16}
+    environment:
+      POSTGRES_USER: askme
+      # 只在 volume 第一次初始化時生效。之後改 .env 的 PG_PASSWORD 不會改到資料庫裡的密碼,
+      # 要換密碼得先在資料庫裡 ALTER USER,再改 .env。
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?.env 缺少 PG_PASSWORD}
+      POSTGRES_DB: askme
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    # 不開 port。備份走 `docker compose exec postgres pg_dump -U askme askme`
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U askme -d askme"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+volumes:
+  claude-home:
+  askme-data:
+  pg-data:

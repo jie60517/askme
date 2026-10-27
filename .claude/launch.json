@@ -1,0 +1,98 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "frontend",
+        "run",
+        "dev"
+      ],
+      "port": 5173,
+      "autoPort": true
+    },
+    {
+      "name": "backend",
+      "runtimeExecutable": "backend/.venv/Scripts/python.exe",
+      "runtimeArgs": [
+        "-m",
+        "uvicorn",
+        "app.main:app",
+        "--port",
+        "8123"
+      ],
+      "cwd": "backend",
+      "port": 8123,
+      "_comment": "不能加 --reload:Windows 上 uvicorn 的 reloader 會把 event loop 換成 WindowsSelectorEventLoop,而 asyncio.create_subprocess_exec 在那上面是 NotImplementedError,問答會整個跑不起來。改後端程式碼要自己重開。"
+    },
+    {
+      "name": "backend-demo",
+      "runtimeExecutable": "backend/.venv/Scripts/python.exe",
+      "runtimeArgs": [
+        "dev_terminal_demo.py"
+      ],
+      "cwd": "backend",
+      "port": 8124,
+      "_comment": "SSH 終端機的本機示範:同一個行程裡跑假 sshd(127.0.0.1:2222)+ 服務(port 8124、暫存 SQLite、MFA 關;管理員帳密 tiptop / tiptop,見 backend/dev_terminal_demo.py 開頭)。前端用 frontend-demo 開。"
+    },
+    {
+      "name": "backend-demo-build",
+      "runtimeExecutable": "backend/.venv/Scripts/python.exe",
+      "runtimeArgs": [
+        "dev_terminal_demo.py"
+      ],
+      "cwd": "backend",
+      "port": 8134,
+      "env": {
+        "DEMO_HTTP_PORT": "8134",
+        "DEMO_SSH_PORT": "2232"
+      },
+      "_comment": "同 backend-demo,但另一組埠(8134 / 假 sshd 2232),直接服務 frontend/dist(先 npm run build)。要對著正式 build 驗畫面時用。"
+    },
+    {
+      "name": "frontend-dist",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "frontend",
+        "run",
+        "preview"
+      ],
+      "port": 4173,
+      "autoPort": true,
+      "_comment": "跑 frontend/dist(正式 build)的那一台,/api 一樣轉到 8123。要先 npm run build。量效能、驗 CSS 都要用這台 —— dev 的 React 與 StyleX 是開發版,數字差好幾倍。"
+    },
+    {
+      "name": "frontend-demo",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "frontend/dev-demo.mjs"
+      ],
+      "port": 5174,
+      "autoPort": true,
+      "_comment": "跟 frontend 一樣的 vite,只是 /api 轉到 8124(backend-demo)。"
+    },
+    {
+      "name": "backend-notes-demo",
+      "runtimeExecutable": "backend/.venv/Scripts/python.exe",
+      "runtimeArgs": [
+        "dev_notes_demo.py"
+      ],
+      "cwd": "backend",
+      "port": 8126,
+      "_comment": "個人筆記(/notes)的本機示範:服務(port 8126、暫存 SQLite 與筆記圖片目錄)+ 一組三題的對話與一則筆記。跟其他示範可以同時開;前端用 frontend-notes-demo(5176)。帳密 tiptop / tiptop。"
+    },
+    {
+      "name": "frontend-notes-demo",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "frontend/dev-notes-demo.mjs"
+      ],
+      "port": 5176,
+      "autoPort": true,
+      "_comment": "跟 frontend-demo 一樣的 vite,只是 /api 轉到 8126(backend-notes-demo)。"
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "_comment": [
+    "SSH 終端機的主機清單。複製成 backend/terminal_hosts.json 再改。",
+    "這個檔案**不進版控**(位址與帳號是部署資訊),而且裡面**不放密碼** —— 要用密碼登入的主機",
+    "填 password_env(環境變數的名字),真正的值寫在 backend/.env。",
+    "服務啟動時讀一次,改完要重啟服務才生效。",
+    "沒有這個檔的時候,主機清單上只有一台:.env 的 SSH_TERMINAL_*(id 是 main、名字是「主機」)。",
+    "",
+    "每一台的欄位:",
+    "  id           必填,英數,前端用它指定要連哪一台",
+    "  label        主機卡片與頁籤上的名字。留空就用「帳號@主機」",
+    "  sub          名字底下那行小字(給人看的說明)",
+    "  via          選填,跳板主機的 id。填了就先連那一台,再從那條連線裡連這一台(等同 ssh 的 ProxyJump)",
+    "  host/port/user  連到哪、用誰",
+    "  key_file     私鑰路徑(建議)。填了就不看 password_env",
+    "  password_env 密碼放在哪個環境變數(退路)",
+    "  known_hosts  主機金鑰檔。留空就共用 SSH_TERMINAL_KNOWN_HOSTS",
+    "  start_dir    檔案欄一開始停在哪。~ = 家目錄",
+    "",
+    "卡片上的 logo 不在這裡設定,放法見 README「SSH 終端機」一節。",
+    "",
+    "⚠️ 跳板那一台的 known_hosts 是**服務這台**對它做 ssh-keyscan 的結果;",
+    "   經跳板連過去的那一台,keyscan 要在**跳板上**做,再把那一行搬進這裡指定的檔案。"
+  ],
+  "hosts": [
+    {
+      "id": "main",
+      "label": "主機",
+      "sub": "main-server · tiptop",
+      "host": "192.168.1.100",
+      "port": 22,
+      "user": "tiptop",
+      "key_file": "/opt/askme/ssh/id_ed25519",
+      "known_hosts": "/opt/askme/ssh/known_hosts",
+      "start_dir": "~"
+    }
+  ]
+}

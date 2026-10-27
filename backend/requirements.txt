@@ -1,0 +1,40 @@
+# ⚠️ fastapi 0.115 鎖的 starlette 0.38 / python-multipart 0.0.12 有三個打得到上傳端點的
+# DoS(CVE-2024-47874、CVE-2025-54121、CVE-2024-53981),修在 starlette ≥0.47.2 與
+# python-multipart ≥0.0.18。整套測試在這組版本上跑過。
+fastapi==0.141.1
+uvicorn[standard]==0.30.6
+sqlalchemy==2.0.35
+# PostgreSQL 驅動(psycopg 3,binary 附編好的 libpq,主機不用裝 dev 套件)。
+# DATABASE_URL 寫 postgresql+psycopg://;寫成 postgresql:// 也行,database.py 會補上驅動名。
+# SQLite 仍然可用(開發版預設與測試都走它),不需要額外套件。
+psycopg[binary]==3.2.9
+pydantic==2.9.2
+python-dotenv==1.0.1
+python-multipart==0.0.32
+python-pptx==1.0.2
+python-docx==1.2.0
+openpyxl==3.1.5
+# 舊版 Excel(.xls,97-2003)。很多系統匯出的還是這種檔,而 openpyxl 讀不了它
+# (xlrd 2.x 反過來也只讀得了 .xls,兩支不會打架)。缺了它 .xls 不會報錯,
+# 只會退回「請使用者另存成 .xlsx」的說明 —— 功能降級但不會壞。
+xlrd==2.0.2
+# PDF 產出(pdfgen)。中文走 Adobe 的 CJK 標準字型 MSung-Light,**不內嵌字型檔** ——
+# 所以主機上不需要裝任何中文字型,repo 裡也不用放一份十幾 MB 的 .ttf。
+reportlab==4.2.5
+# ⚠️ **這一條是安全修正,不是可有可無的相依。**
+#
+# openpyxl 讀 xl/worksheets/*.xml 時,裝了 defusedxml 就用它、沒裝就退回 stdlib 的
+# xml.etree.ElementTree.iterparse —— 而 stdlib 那支**展開內部實體時沒有上限**。
+# (自動偵測寫在 openpyxl/xml/functions.py:`if DEFUSEDXML is True: from
+#  defusedxml.ElementTree import iterparse`,所以只要裝了就會生效,程式碼不用改。)
+#
+# 沒裝的話,一個 1~2 KB、多疊幾層 <!ENTITY> 的 .xlsx 在 extract_text 裡就能展開成
+# 上億個字元、數 GB 記憶體。而 save_uploads 是同步的卻被 async def 呼叫,
+# 所以那段時間**整個 uvicorn 的 event loop 是停住的**(所有人的問答串流一起卡),
+# 而且 /api/preview 每按一次就重跑一遍。裝上之後這種檔案會馬上被拒絕,
+# extract_text 回 None,呼叫端改讓 claude 自己讀原始檔 —— 正常的 .xlsx 不受影響。
+defusedxml==0.7.1
+# SSH 終端機(側邊欄 SSH Server):WebSocket ⇄ sshd 的橋接與檔案欄的 SFTP。
+# 純 Python,但依賴 cryptography(有預編好的 wheel;pip 拉不到 wheel 時會退回原始碼編譯)。
+asyncssh==2.24.0
+# 跑測試用的(pytest、httpx)在 requirements-dev.txt,Docker image 不裝。
