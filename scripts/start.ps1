@@ -39,6 +39,15 @@ foreach ($port in $BackendPort, $FrontendPort) {
     }
 }
 
+# claude 的 Read 讀 PDF 要 PATH 上有 pdftoppm(見 poppler.ps1)。只加在這個視窗,後端與它叫的 claude 會繼承
+. (Join-Path $PSScriptRoot 'poppler.ps1')
+$popplerBin = Find-PopplerBin
+if ($popplerBin) {
+    $env:Path = "$popplerBin;$env:Path"
+} else {
+    Write-Host '注意:找不到 Poppler(pdftoppm),問答讀不了大份的 PDF。跑一次 .\setup.cmd 會幫你裝。' -ForegroundColor Yellow
+}
+
 function Wait-Http($url, $proc, $seconds) {
     for ($i = 0; $i -lt $seconds; $i++) {
         if ($proc.HasExited) { return $false }

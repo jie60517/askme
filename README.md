@@ -19,6 +19,8 @@
 - Node.js 22.12 以上(或 20.19 以上)
 - Claude Code CLI,裝好並登入過一次(終端機打 `claude` 能問答)。
   沒有它網站照樣開得起來,只是問答會回「無法啟動 claude CLI」
+- Poppler(`pdftoppm`),claude 讀 PDF 要用。`setup.cmd` 會用 winget 自動裝;
+  沒有它問答只讀得了小份的 PDF,大份的手冊會回「pdftoppm is not installed」,其他照常
 
 ## 快速開始(Windows)
 

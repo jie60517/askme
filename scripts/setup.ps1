@@ -16,7 +16,7 @@ function Step($msg) { Write-Host "`n== $msg" -ForegroundColor Cyan }
 function Ok($msg) { Write-Host "   OK  $msg" -ForegroundColor Green }
 function Fail($msg) { Write-Host "`n[失敗] $msg" -ForegroundColor Red; exit 1 }
 
-Step '1/5 檢查 Python、Node、claude'
+Step '1/6 檢查 Python、Node、claude'
 # `python` 可能是 Windows 市集的空殼(WindowsApps\python.exe):不印版本、只開市集,所以看輸出不看有沒有這個指令
 $pyVer = ''
 try { $pyVer = (& python -c "import sys; print('%d.%d' % sys.version_info[:2])" 2>$null) } catch {}
@@ -41,7 +41,7 @@ if (Get-Command claude -ErrorAction SilentlyContinue) {
     Write-Host '   !!  找不到 claude CLI。網站照樣裝得起來,但問答要等你裝好 Claude Code 並登入過一次。' -ForegroundColor Yellow
 }
 
-Step '2/5 建立後端虛擬環境 backend\.venv'
+Step '2/6 建立後端虛擬環境 backend\.venv'
 if (Test-Path $venvPy) {
     Ok '已經有了,略過'
 } else {
@@ -50,12 +50,12 @@ if (Test-Path $venvPy) {
     Ok '建好了'
 }
 
-Step '3/5 安裝後端套件(第一次約 1~2 分鐘)'
+Step '3/6 安裝後端套件(第一次約 1~2 分鐘)'
 & $venvPy -m pip install --disable-pip-version-check -r (Join-Path $backend 'requirements-dev.txt')
 if ($LASTEXITCODE -ne 0) { Fail '後端套件安裝失敗,看上面的訊息(通常是網路或 Python 版本)。' }
 Ok '後端套件裝好了'
 
-Step '4/5 建立後端設定檔 backend\.env'
+Step '4/6 建立後端設定檔 backend\.env'
 $envFile = Join-Path $backend '.env'
 if (Test-Path $envFile) {
     Ok '已經有了,不覆蓋'
@@ -64,7 +64,7 @@ if (Test-Path $envFile) {
     Ok '從 .env.example 複製(管理員帳密 tiptop / tiptop)'
 }
 
-Step '5/5 安裝前端套件(第一次約 1 分鐘)'
+Step '5/6 安裝前端套件(第一次約 1 分鐘)'
 Push-Location $frontend
 try {
     # 要叫 npm.cmd,不是 npm:後者會解析成 npm.ps1,它從 $MyInvocation.Line 切參數,
@@ -76,6 +76,20 @@ try {
 }
 Ok '前端套件裝好了'
 Write-Host '   (上面若有「N vulnerabilities」是套件的已知漏洞提醒,不影響啟動;不要跑 npm audit fix,它會改掉 package-lock.json。)' -ForegroundColor DarkGray
+
+Step '6/6 讀 PDF 的工具 Poppler'
+. (Join-Path $PSScriptRoot 'poppler.ps1')
+$popplerBin = Find-PopplerBin
+if (-not $popplerBin -and (Get-Command winget -ErrorAction SilentlyContinue)) {
+    & winget install --id $PopplerWingetId -e --source winget --accept-package-agreements --accept-source-agreements
+    $popplerBin = Find-PopplerBin
+}
+if ($popplerBin) {
+    Ok "Poppler($popplerBin)"
+} else {
+    # 不擋:少了它網站照樣能用,只是問答讀不了大份的 PDF
+    Write-Host "   !!  沒裝成 Poppler。網站照樣能用,但問答讀不了大份的 PDF。可以自己裝:winget install --id $PopplerWingetId -e,裝完重開 start.cmd。" -ForegroundColor Yellow
+}
 
 $ws = Join-Path $root 'workspace'
 Write-Host ''

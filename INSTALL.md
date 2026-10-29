@@ -30,6 +30,7 @@ git clone https://github.com/jie60517/askme.git
 
 **環境**:需要 Python 3.11+、Node 20.19+ 或 22.12+、Claude Code CLI 已登入(`claude` 能問答)。
 `setup.cmd` 第一步也會檢查;缺 `claude` 只會警告(網站開得起來,問答會回「無法啟動 claude CLI」)。
+讀 PDF 要的 Poppler 不用先裝:`setup.cmd` 最後一步會用 winget 裝(`oschwartz10612.Poppler`)。
 
 ### 1. 安裝
 
@@ -42,6 +43,9 @@ repo 根目錄:
 - 會跑 1~3 分鐘,最後一段是綠字「安裝完成」。
 - 「N vulnerabilities」:不影響啟動,**不要跑 `npm audit fix`**(會改 `package-lock.json`)。
 - 紅字「[失敗]」:照那行說的處理(多半是 Python / Node 版本或網路),處理完重跑 `.\setup.cmd` 就好。
+- 黃字「沒裝成 Poppler」:網站照樣能用,只是讀不了大份的 PDF。多半是這台沒有 winget(舊版 Windows 10),
+  請他從 Microsoft Store 裝「應用程式安裝程式」後重跑 `.\setup.cmd`。
+- 已經裝好、問答卻回「pdftoppm is not installed」:`start.cmd` 是在裝 Poppler 之前開的,Ctrl+C 再 `.\start.cmd`。
 - `setup.cmd` / `start.cmd` 用 `-ExecutionPolicy Bypass` 叫 `scripts\*.ps1`(只放行那一次執行,
   不改系統設定),所以預設擋 `.ps1` 的電腦也跑得動。**要打 `.cmd`,不要直接打 `scripts\*.ps1`**
   —— 直接打會被執行原則擋下(「這個系統上已停用指令碼執行」)。

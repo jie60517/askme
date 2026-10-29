@@ -34,9 +34,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # claude 與 full 帳號的 Bash 會用到的基本工具。容器裡沒有的指令,AI 就叫不到 —— 缺什麼補在這一行。
 # /usr/bin/python3:hook 與腳本習慣寫這個路徑,image 的 python 在 /usr/local/bin。
+# poppler-utils:claude 的 Read 讀大份的 PDF、或指定頁數讀,是叫 pdftoppm 把頁面轉成圖;沒有它只讀得了小份的。
+# poppler-data 是 CJK 的 CMap,中文 PDF 要它才轉得對;它只是 recommends,--no-install-recommends 不會自己帶。
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      ca-certificates curl git less openssh-client procps ripgrep \
+      ca-certificates curl git less openssh-client procps ripgrep poppler-utils poppler-data \
  && rm -rf /var/lib/apt/lists/* \
  && ln -s /usr/local/bin/python3 /usr/bin/python3
 
