@@ -202,7 +202,7 @@ const sectionLabelOf = (id: SectionId) => SECTIONS.find((sec) => sec.id === id)?
  * ⚠️ 走 `lazyChunk` 不是原生 `lazy`:上版後舊分頁去抓舊檔名會 404,原生 lazy 直接白畫面
  *    (理由見 `lib/lazyChunk.ts`)。
  * ⚠️ **閒下來就先載**:不預載的話第一次打開設定時這塊(144px 預覽台 + 兩列)會在對話框
- *    開好之後才一格撐出來 —— 正是這一輪要消掉的那種跳動。這支檔案是 App 靜態 import 的,
+ *    開好之後才一格撐出來,對話框會跳一下。這支檔案是 App 靜態 import 的,
  *    所以模組一載入就排一個 idle 預載;沒有 requestIdleCallback 的瀏覽器(Safari)退回 setTimeout。
  */
 const loadCompanionLook = () => import('./CompanionLook');
@@ -218,8 +218,8 @@ const fadeIn = stylex.keyframes({from: {opacity: 0}, to: {opacity: 1}});
 const styles = stylex.create({
   /*
    * ⚠️ **只淡入,不要加位移或縮放。** 這兩個狀態的圓圈是**同一個尺寸、同一個位置**
-   * (128px,見 `AvatarCropper` 的 `PREVIEW_PX`)—— 那是這一輪好不容易對齊的,
-   * 再加位移等於自己把「不要震動」那件事做回去。
+   * (128px,見 `AvatarCropper` 的 `PREVIEW_PX`),
+   * 再加位移的話切換時圓圈會震一下。
    */
   photoStage: {
     /*
@@ -340,8 +340,8 @@ const styles = stylex.create({
   /*
    * 頭像底下那兩顆鈕:**等寬,但只有內容那麼寬**,整組置中。
    *
-   * 兩個要求同時成立才對,而這是第三版了 ——
-   *  1. 各給一個固定 `rem` 寬:字級 200% 時兩顆 544px,凸出 440px 的對話框(複審打回);
+   * 兩個要求同時成立才對,另外兩種寫法都不行:
+   *  1. 各給一個固定 `rem` 寬:字級 200% 時兩顆 544px,凸出 440px 的對話框;
    *  2. 平分整列(`flexGrow: 1`):不會溢出了,但一顆 200px、「Add photo」獨自一顆時
    *     整整 408px,太大了。
    *

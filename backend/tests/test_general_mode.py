@@ -59,7 +59,7 @@ def test_沒有版本說明(general_root):
     assert agent.build_context_note(config.GENERAL_BASE) == ""
     prompt = agent.build_prompt("寫一支 python 排序", "run-1", None, config.GENERAL_BASE)
     assert "這個版本" not in prompt
-    assert "4gl" not in prompt
+    assert agent.COPY_MANIFEST_NAME not in prompt, "一般模式沒有程式碼樹,不講複製清單那段"
     # 產檔的說明照舊(Excel / Word 自動轉)
     assert "Excel" in prompt
 
@@ -101,7 +101,7 @@ class _FakeProc:
 def _run(monkeypatch, tmp_path, *, allowed_tools, writable=None):
     monkeypatch.setattr(config, "UPLOAD_DIR", tmp_path / "uploads")
     monkeypatch.setattr(config, "OUTPUT_DIR", tmp_path / "outputs")
-    monkeypatch.setattr(config, "CLAUDE_EXTRA_DIRS", [str(tmp_path / "erp_tree")])
+    monkeypatch.setattr(config, "CLAUDE_EXTRA_DIRS", [str(tmp_path / "code_tree")])
     captured = {}
 
     async def fake_exec(*cmd, **kwargs):
@@ -137,9 +137,9 @@ def test_A1_不掛任何專案的東西(general_root, tmp_path, monkeypatch):
     )
     cmd = captured["cmd"]
     assert captured["cwd"] == workdir
-    assert "--mcp-config" not in cmd, "一般模式不接 ERP 知識庫 / 問資料"
-    assert "--add-dir" not in cmd, "全站的 ERP 樹、flows/ 都不掛"
-    assert str(tmp_path / "erp_tree") not in " ".join(cmd)
+    assert "--mcp-config" not in cmd, "一般模式不接 MCP"
+    assert "--add-dir" not in cmd, "專案的程式碼樹、flows/ 都不掛"
+    assert str(tmp_path / "code_tree") not in " ".join(cmd)
 
 
 def test_A5_唯讀帳號只讀得到自己那一格(general_root, tmp_path, monkeypatch):

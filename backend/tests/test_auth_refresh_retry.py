@@ -137,7 +137,7 @@ def test_其他錯誤不重跑(monkeypatch):
 def test_已經開始作答就不壓事件(monkeypatch):
     async def fake_stream(**_kw):
         yield {"type": "step", "kind": "init"}
-        yield {"type": "source", "tool": "Read", "target": "a.4gl"}
+        yield {"type": "source", "tool": "Read", "target": "a.py"}
         yield {"type": "delta", "text": "答"}
         yield {"type": "done", "success": True, "answer": "答", "error": None}
 

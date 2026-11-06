@@ -70,7 +70,6 @@ export const sideNavStyles = stylex.create({
    * Astryx 0.7 起巢狀的容器不再一層層往內推(縮排改成畫在每一列自己的內距裡,
    * 見 global.css「巢狀列的縮排」),每一層的左緣都是整欄的左緣,
    * 所以深度要自己帶進來:`style={nestGuideDepth(上一列的深度)}`,最上層那一列是 0(不帶也是 0)。
-   * (0.4 時代容器每層往內推 --spacing-6,這裡寫死 16 - 24 = -8px 就每層都對。)
    *
    * 收合時它一樣在,但外層那個 `overflow: hidden` 的格子高度是 0,
    * 所以看不到 —— 不必另外判斷開合。

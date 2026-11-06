@@ -31,6 +31,9 @@ def _run(code: str, db_path: Path) -> subprocess.CompletedProcess:
         env=env,
         capture_output=True,
         text=True,
+        # 子行程的 log 有中文;不指定的話 Windows 用 cp950 解,解不了就在讀取的執行緒裡炸一個警告
+        encoding="utf-8",
+        errors="replace",
     )
 
 
@@ -120,3 +123,40 @@ def test_static_cache_headers(tmp_path):
     )
 
     assert result.returncode == 0, result.stderr
+
+
+def test_old_database_gets_new_columns_and_seed_roles(tmp_path):
+    """上一版開發版的資料庫(沒有 `ADDED_COLUMNS` 那幾欄、沒有 roles 表)開機要自己補好。
+
+    `create_all` 不動已存在的表,少了 `database.ensure_columns` 的話,第一個讀帳號的請求就 500。
+    既有的 Software engineer 帳號要拿到跟上一版一樣的權限(SSH Server、Work Flow、AI 可執行指令)。
+    """
+    db = tmp_path / "old.db"
+
+    result = _run(
+        "from datetime import datetime\n"
+        "from fastapi.testclient import TestClient\n"
+        "from sqlalchemy import inspect, text\n"
+        "from app.database import ADDED_COLUMNS, Base, engine\n"
+        "from app import models\n"
+        "Base.metadata.create_all(bind=engine)\n"
+        "with engine.begin() as conn:\n"
+        "    for table, column in ADDED_COLUMNS:\n"
+        "        conn.execute(text(f'ALTER TABLE {table} DROP COLUMN {column}'))\n"
+        "    conn.execute(text('DROP TABLE roles'))\n"
+        "    conn.execute(text(\"INSERT INTO users (username, password, display_name, role, disabled, password_changed_at)"
+        " VALUES ('eng', 'x', 'eng', 'Software engineer', 0, :t)\"), {'t': datetime.utcnow()})\n"
+        "assert 'perm_overrides' not in {c['name'] for c in inspect(engine).get_columns('users')}\n"
+        "from app.main import app\n"
+        "from app import roles\n"
+        "with TestClient(app):\n"
+        "    insp = inspect(engine)\n"
+        "    for table, column in ADDED_COLUMNS:\n"
+        "        assert column in {c['name'] for c in insp.get_columns(table)}, (table, column)\n"
+        "    perms = roles.user_perms('eng')\n"
+        "    assert perms['ssh'] and perms['workflow'] and perms['ai_exec'], perms\n"
+        "    assert not perms['users'], perms\n",
+        db,
+    )
+
+    assert result.returncode == 0, f"舊資料庫沒有補好:\n{result.stderr}"

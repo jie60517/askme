@@ -125,6 +125,8 @@ RULES:
      拼圖名稱、出口(成功 / 失敗)、執行紀錄都是中文。側邊欄那一列 `Work Flow` 是英文。拼圖名稱**後端也有一份**
      (`app/workflows.py` 的 `LABELS` / `OUTS`),畫面上用的是後端 `/catalog` 給的那一份。
      這一頁是可選功能:部署的人沒放 `backend/workflow_actions.json` 就整個不出現(`/api/me` 的 `workflow_enabled`)。
+  7. **一般模式 `/general` 的字是中文**(`lib/generalMode.ts`、`lib/composerMode.ts`):輸入框底列的 Token「一般模式」、
+     `/` 選單那一行說明。`/general` 這個指令名、選單標題 `Commands` 照慣例是英文。
 
 ## 跑測試
 

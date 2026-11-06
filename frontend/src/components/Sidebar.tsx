@@ -235,8 +235,10 @@ const styles = stylex.create({
    * Astryx 0.7.8 起巢狀縮排是**每一列自己帶**(`padding-inline-start` = 列的基本內距 spacing-2 + 一層 spacing-6),
    * 容器不再往右推(0.4.4 是容器推)。這句是純文字不是列,不另外縮的話會貼在最左邊、導引線(sideNavStyles.nestGuide)
    * 穿過字中間。照子項目同一個算法縮,字就跟對話列同一條線。
+   * ⚠️ 側邊欄收成窄欄時這一層搬進浮層,Astryx 在浮層裡把深度歸 0(列只剩 spacing-2)—— 那時改用 `emptyHintRail`。
    */
   emptyHint: {paddingInlineStart: 'calc(var(--spacing-2) + var(--spacing-6))'},
+  emptyHintRail: {paddingInlineStart: 'var(--spacing-2)'},
   /**
    * 帳號區的**選取底色**(見 `SelectionPill`)。長相照 Astryx 導覽列自己的選取態
    *(`navItemStyles.selected`:`--color-neutral` + `--radius-element`),所以滑完停下來跟導覽列內建的選取態一模一樣。
@@ -2084,9 +2086,15 @@ export function Sidebar({
                   ),
                 )
               ) : isListLoaded ? (
-                <Text type="supporting" xstyle={styles.emptyHint}>No chats yet.</Text>
+                <Text type="supporting" xstyle={isCollapsed ? styles.emptyHintRail : styles.emptyHint}>
+                  No chats yet.
+                </Text>
               ) : listFailed ? (
-                <Text type="supporting" color="secondary" xstyle={styles.emptyHint}>
+                <Text
+                  type="supporting"
+                  color="secondary"
+                  xstyle={isCollapsed ? styles.emptyHintRail : styles.emptyHint}
+                >
                   Could not load chats.
                 </Text>
               ) : null}
@@ -2544,7 +2552,7 @@ function FolderNode({
   /*
    * ⚠️ 從 `byId` 依序取、不要從 `folderItems` 取:`folderItems` 的鍵順序是後端
    * 歸類資料列的順序(舊的在前),`byId` 才是「新的在上面」。照 `folderItems` 的順序取的話,
-   * e-Service 新單歸進資料夾後會排在舊單下面。
+   * 新對話歸進資料夾後會排在舊的下面。
    */
   const inside = [...ctx.byId.values()].filter(
     (c) => ctx.folderItems[c.conversation_id] === folder.id,

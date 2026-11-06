@@ -782,7 +782,7 @@ async def stream_agent(
     # 依登入身分決定,由呼叫端(ask.py)算好傳進來 —— 不能讓請求自己指定要寫哪。
     if writable_extra_dirs:
         extra_dirs += writable_extra_dirs
-    # 一般模式:全站額外目錄(CLAUDE_EXTRA_DIRS,ERP 的樹)與 flows/ 這類
+    # 一般模式:全站額外目錄(CLAUDE_EXTRA_DIRS)與 flows/ 這類
     # 專案知識的可寫目錄都不掛 —— 「不看專案」就是一個都不掛。工具本身照角色(有 Bash 的人照樣讀得到)。
     if config.is_general(knowledge_base):
         extra_dirs = []

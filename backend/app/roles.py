@@ -431,7 +431,7 @@ def set_user_access(username: str, role_id: Optional[str] = None, value: Any = N
 def ensure_seeded() -> bool:
     """角色表是空的(第一次上這一版)→ 建兩個種子角色。回有沒有建。
 
-    舊的兩個個人勾選**不用搬**:`perm_overrides` 還是 NULL 的帳號照舊欄位算(見 `_own`)。
+    既有帳號不用搬:`users.role` 存的就是種子角色的 id,`perm_overrides` 是 NULL = 跟角色一樣(見 `_own`)。
     預設角色被刪掉(理論上擋住了,但資料庫是可以直接改的)→ 補回來,不然沒角色的人一項權限都對不上。
     """
     db = SessionLocal()

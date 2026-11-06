@@ -18,9 +18,9 @@ export function useModeReturnKb({
   projectKb,
   restore,
 }: {
-  /** 跟兩個模式 hook 同一個 key:對話 id,空白頁用 NEW_KEY */
+  /** 跟一般模式同一個 key:對話 id,空白頁用 NEW_KEY */
   storeKey: string;
-  /** 兩個模式任一個開著 */
+  /** 一般模式開著 */
   active: boolean;
   /** 輸入框現在的專案(effectiveKb) */
   projectKb: string | undefined;

@@ -1732,6 +1732,16 @@ dialog[data-app-dialog][data-leaving]::backdrop {
 }
 
 /*
+ * 浮層裡**不畫子項目的導引線**(`sideNavStyles.nestGuide` 的 ::before)。
+ * 浮層只有這一層,沒有東西要連回上一層;而且 Astryx 在浮層裡把列的縮排歸 0(列只剩 spacing-2),
+ * 線還畫在 spacing-2 × 2 的位置,會穿過每一列的字。
+ * 屬性選擇器寫兩次:跟 StyleX 的 `.x…::before` 同分時才不會輸給它(那份 CSS 在後面載入)。
+ */
+[data-rail-flyout][data-rail-flyout]::before {
+  display: none;
+}
+
+/*
  * 搜尋面板:**捲軸的位置永遠留著**。
  *
  * 20 列要捲、篩到 7 列不用捲 —— 捲軸一消失,清單可用的寬度就多出十幾 px,
