@@ -359,68 +359,84 @@ export async function getAudit(category: AuditCategory, offset: number): Promise
 // ── 帳號管理 ───────────────────────────────────────────────────────
 
 /**
- * 職稱的兩個合法值,**順序就是下拉選單的順序**。對應後端的 `users.ROLES`。
+ * 權限目錄(後端 `roles.PERM_KEYS`)。**順序就是畫面上的順序**:SSH Server 與它底下的 Work Flow、側邊欄的管理頁,
+ * 最後是不在側邊欄的功能。
  *
- * ⚠️ 大小寫要跟後端一模一樣(`Software engineer`,小寫 e)——
- * 後端用字串相等判斷要不要給完整權限,打錯一個字母就變成唯讀。
+ * ⚠️ 跟後端一字不差(連順序)—— `backend/tests/test_roles.py` 會讀這一行對字,宣告的寫法改了要一起改那條。
  */
-export const USER_ROLES = ['Consultant', 'Software engineer'] as const;
-export type UserRole = (typeof USER_ROLES)[number];
+export const PERM_KEYS = ['ssh', 'workflow', 'usage', 'security', 'users', 'ai_exec'] as const;
+export type PermKey = (typeof PERM_KEYS)[number];
+/** 每一項都是開或關 */
+export type PermFlag = PermKey;
+/** 一份完整的權限(後端 `schemas.Perms`) */
+export type Perms = Record<PermFlag, boolean>;
 
-/*
- * ⚠️ 下面三個常數是**這兩個字串在前端的唯一出處**:散在 `roleGrantsFull`、
- * `GROUP_ORDER`、`groupKeyOf` 與職稱欄的預設文字裡各寫一次的話,
- * 大小寫打錯一個字母就是「畫面顯示 Consultant、實際上有 Bash」那種看不出來的錯。
- *
- * ⚠️ **一律寫字面值,不要用 `USER_ROLES[0]` / `[1]` 的位置去指**。
- * `USER_ROLES` 的順序是**下拉選單的順序**,
- * 是排版決定;拿位置當身分的話,哪天把工程師排到前面,
- * `DEFAULT_USER_ROLE` 就會靜靜變成 `Software engineer` —— 那是把所有
- * 沒設過職稱的人一次給上 Bash 權限,而畫面上完全看不出來。
- * 型別標成 `UserRole` 就夠了:字面值打錯編譯不會過。
- */
+/** 什麼都沒有的那一份(新增角色時的初始值) */
+export const NO_PERMS: Perms = {
+  ssh: false,
+  workflow: false,
+  usage: false,
+  security: false,
+  users: false,
+  ai_exec: false,
+};
 
 /**
- * `Consultant`(唯讀)這個**職稱本身**。分群、篩選、比對某個人是不是這個職稱時用這個。
- *
- * ⚠️ 跟 `DEFAULT_USER_ROLE` **是兩件事,值才剛好一樣**——
- * 後端 `users.py` 的 `ROLE_CONSULTANT` / `DEFAULT_ROLE` 也是這樣分的:
- * 一個是「這個職稱」,一個是「沒設過的人算什麼」。
- * 前端若只留 `DEFAULT_USER_ROLE` 一個、兩種用途共用,等於把後端刻意留的
- * 那條縫在這裡補起來 —— 哪天「沒設過的人」要改成別的預設(例如
- * 「未指定」),分群那幾處會跟著一起錯。
+ * 這一項在上層現在的值底下能不能勾 —— 跟後端 `roles._pin` 同一組:
+ * Work Flow 會在主機上跑指令,沒有 SSH Server 就一定沒有 Work Flow。
  */
-export const CONSULTANT_ROLE: UserRole = 'Consultant';
+export function parentAllows(key: PermFlag, perms: Perms): boolean {
+  if (key === 'workflow') return perms.ssh;
+  return true;
+}
+
+/** 把上層不允許的那幾項歸零。畫面上改上層時套這一支,勾選框才不會停在一個存不進去的狀態 */
+export function pinPerms(perms: Perms): Perms {
+  const next = {...perms};
+  for (const key of PERM_KEYS) {
+    if (!parentAllows(key, perms)) next[key] = false;
+  }
+  return next;
+}
+
+/** `schemas.RoleOut` */
+export type Role = {
+  id: string;
+  name: string;
+  perms: Perms;
+  /** 預設角色:新帳號給它、不能刪 */
+  is_default: boolean;
+  /** 掛著這個角色的帳號數(含停用的;有人用就不能刪) */
+  member_count: number;
+  /** 通知名單用到「All <這個角色>」的 Work Flow 數(有就不能刪) */
+  flow_refs: number;
+};
 
 /**
- * 沒設過職稱的人在畫面上等同這個(對應後端 `users.DEFAULT_ROLE`)。
- * **只用在「這個人沒有職稱,那該顯示/送出什麼」**,不要拿它去比對職稱 ——
- * 那是 `CONSULTANT_ROLE` 的事。
+ * 這個角色刪不刪得掉:預設角色、有人用(含停用)、Work Flow 通知名單用到它都不行。
+ * 左邊勾選框與修改框的「刪除角色」都看這一支 —— 跟後端 `roles.delete_roles` 同一組條件。
  */
-export const DEFAULT_USER_ROLE: UserRole = CONSULTANT_ROLE;
-
-/** 帶完整權限(可以在主機上跑 Bash)的那個職稱。對應後端的 `_FULL_ROLES`。 */
-export const FULL_ACCESS_ROLE: UserRole = 'Software engineer';
-
-/** 這個職稱帶不帶完整權限。跟後端 `users.role_grants_full()` 是同一條規則。 */
-export function roleGrantsFull(role: string | null | undefined): boolean {
-  return (role ?? '').trim() === FULL_ACCESS_ROLE;
+export function roleDeletable(role: Role): boolean {
+  return !role.is_default && role.member_count === 0 && !role.flow_refs;
 }
 
 /**
  * `schemas.UserOut`。
  *
- * ⚠️ **`tools` 是推導出來的,不要拿它當來源**(職稱就是權限)。
- * 後端由 `role` 算出 `tools`;畫面上要判斷權限請用 `roleGrantsFull(role)`,
- * 兩者永遠一致,而 `role` 才是使用者實際在改的東西。
+ * 權限由**角色 + 個人加減**決定:`perms` 是實際權限,`own` 是跟角色不同的那幾項。
+ * `tools` 是舊欄位,畫面不再讀。
  */
 export type ManagedUser = {
   username: string;
   display_name: string;
   tools: string | null;
   disabled: boolean;
-  /** 畫面上的職稱(@ 選單的副標)。null = 沒設,後端讀的那一側會退回預設值。 */
-  role: string | null;
+  /** 角色的 id(空的、對不上的後端已退回預設角色) */
+  role: string;
+  /** 角色在畫面上的名字 */
+  role_name: string;
+  perms: Perms;
+  own: Partial<Perms>;
   created_at: string | null;
   password_changed_at: string | null;
   /** 還在用發下去的預設密碼 */
@@ -441,7 +457,7 @@ export async function getUsers(): Promise<ManagedUser[]> {
 
 /**
  * 新增帳號**只送帳號名**。
- * 職稱一律是後端的預設值(Consultant)= 唯讀;要完整權限就建完之後改職稱。
+ * 角色一律是後端的預設角色;要更多權限就建完之後改角色。
  */
 export async function createUser(username: string) {
   const res = await api.post<ManagedUser>('/api/users', {username});
@@ -450,16 +466,37 @@ export async function createUser(username: string) {
 
 /**
  * 只帶想改的欄位,沒帶的後端不動。
- * ⚠️ `role` 帶空字串是「清掉職稱」,**不帶**才是「不動」—— 後端用
- * `model_fields_set` 分辨這兩件事,所以不要為了省事把空值濾掉。
+ * `perms` 是這個人**完整**的權限清單(畫面上那份),後端只存跟角色不同的那幾項;
+ * 只換角色不帶 `perms` = 個人加減照留。
  */
 export async function updateUser(
   username: string,
-  // ⚠️ 沒有 `full` —— 權限由 role 推導,後端不收那個欄位
-  patch: {disabled?: boolean; role?: string},
+  patch: {disabled?: boolean; role?: string; perms?: Perms},
 ): Promise<ManagedUser> {
   const res = await api.patch<ManagedUser>(`/api/users/${encodeURIComponent(username)}`, patch);
   return res.data;
+}
+
+// ── 角色(帳號管理頁的「角色」分頁)──
+
+export async function getRoles(): Promise<Role[]> {
+  const res = await api.get<Role[]>('/api/roles');
+  return res.data;
+}
+
+export async function createRole(name: string, perms: Perms): Promise<Role> {
+  const res = await api.post<Role>('/api/roles', {name, perms});
+  return res.data;
+}
+
+export async function updateRole(id: string, patch: {name?: string; perms?: Perms}): Promise<Role> {
+  const res = await api.patch<Role>(`/api/roles/${encodeURIComponent(id)}`, patch);
+  return res.data;
+}
+
+/** 一次刪好幾個。一個刪不掉後端就全部不刪(409,detail 一次講完原因) */
+export async function deleteRoles(ids: string[]): Promise<void> {
+  await api.post('/api/roles/delete', {ids});
 }
 
 export async function resetUserPassword(username: string): Promise<void> {

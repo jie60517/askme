@@ -28,6 +28,27 @@ export interface PetSpeech {
   href?: string;
 }
 
+/**
+ * 現在有幾隻吉祥物在聽(`PetCompanion` 的 `useSpeech` 掛上時 +1)。
+ *
+ * 沒有在聽的時候(Settings 把吉祥物關掉、手機本來就不畫、或剛打開還在載入),`petSay` 講的話改由
+ * `components/PetSpeechToast.tsx` 發成 toast —— @ 提及、分享、額度那幾句是在傳訊息,不能因為沒有吉祥物就消失
+ *(手機上吉祥物不畫,而那則已經被標成講過了,不發 toast 就會被吞掉)。
+ */
+let listening = 0;
+
+/** 吉祥物開始聽;回傳的函式是「不聽了」 */
+export function holdPetEars(): () => void {
+  listening += 1;
+  return () => {
+    listening -= 1;
+  };
+}
+
+export function isPetListening(): boolean {
+  return listening > 0;
+}
+
 export function petSay(speech: PetSpeech) {
   window.dispatchEvent(new CustomEvent<PetSpeech>(PET_SPEAK_EVENT, { detail: speech }));
 }

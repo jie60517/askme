@@ -7,7 +7,7 @@
 
 import logging
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -102,3 +102,37 @@ def missing_package(package: str, output_name: str) -> List[str]:
         "請在 backend 的 venv 重跑:./.venv/bin/pip install -r requirements.txt"
         % (package, output_name)
     ]
+
+
+# ---------------------------------------------------------------- 轉檔的原稿
+
+#: 記下「已經轉成 Word / PDF / Excel 的原稿」。名字照清單檔的慣例用 `__` 開頭,
+#: `agent.list_output_files` 不列它,也不列它點名的檔。
+SOURCES_NAME = "__sources__.txt"
+
+
+def mark_source(session_dir: Path, name: str, converted: bool) -> None:
+    """記下一份原稿這次轉成功(`converted=True`)或失敗。
+
+    為什麼要收:AI 產 Word / PDF 是先寫 .md 再轉,
+    轉完原稿跟成品並排在下載清單裡。原稿**留在磁碟上** —— AI 續問「第三段改一下」要讀得到它,
+    只是不列給使用者。
+    同一份 .md 可能同時轉 Word 和 PDF:**有一次失敗就照列**,使用者至少拿得到內容。
+    """
+    try:
+        with (session_dir / SOURCES_NAME).open("a", encoding="utf-8") as fh:
+            fh.write(("+" if converted else "-") + name + "\n")
+    except OSError:
+        # 記不下來就照列 —— 多一個檔,比整題收尾出錯好
+        logger.warning("原稿紀錄寫不進去 dir=%s", session_dir)
+
+
+def hidden_sources(session_dir: Path) -> Set[str]:
+    """不列給使用者的原稿:轉成功過、而且沒有任何一次失敗的。"""
+    try:
+        lines = (session_dir / SOURCES_NAME).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return set()
+    done = {line[1:] for line in lines if line.startswith("+")}
+    failed = {line[1:] for line in lines if line.startswith("-")}
+    return done - failed

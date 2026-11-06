@@ -40,6 +40,7 @@ import {createPointerOwner} from '../lib/pointerOwner';
 import {prefersReducedMotion} from '../lib/rubberband';
 import {releaseVelocityPxPerMs} from '../lib/velocity';
 import {LoadingScreen} from './LoadingScreen';
+import {DocumentPreview, SheetPreview} from './OfficePreview';
 import type {LightboxItem} from '../lib/lightboxItem';
 import {useDialogExit} from './useDialogExit';
 
@@ -596,14 +597,15 @@ export function FileLightbox({items, index, onIndexChange, onClose}: Props) {
 }
 
 export function ModeIcon({mode}: {mode: LightboxItem['mode']}) {
-  if (mode === 'office') return <Icon icon={FileSpreadsheet} size="sm" />;
+  if (mode === 'document' || mode === 'sheet') return <Icon icon={FileSpreadsheet} size="sm" />;
   if (mode === 'pdf' || mode === 'text') return <Icon icon={FileText} size="sm" />;
   return <Icon icon={File} size="sm" />;
 }
 
 /**
- * 一份檔案的內容本身。分圖片 / PDF / 其餘三條路,其餘那條再由 `TextPreview`
- * 分成 Markdown、程式碼(有 `codeLanguage()`)與純文字。
+ * 一份檔案的內容本身。分圖片 / PDF / Word 與簡報(轉成 PDF)/ Excel(表格)/ 其餘五條路,
+ * 其餘那條再由 `TextPreview` 分成 Markdown、程式碼(有 `codeLanguage()`)與純文字。
+ * Word / 簡報 / Excel 轉不了時退回 `TextPreview`(後端抽出來的純文字)。
  * 匯出是給**右側預覽面板**共用的 —— 燈箱與側欄要長得一模一樣,
  * 兩邊各刻一份的話 PDF 的框、文字的截斷、二進位的保險一定會分岔。
  */
@@ -624,13 +626,32 @@ export function Preview({item}: {item: LightboxItem}) {
        * 名單裡沒有 html / svg / xml,其餘一律 `Content-Disposition: attachment`
        * (iframe 對它只會觸發下載,不會當文件執行),而且每個回應都帶 nosniff。
        * 也就是說這裡放得進來的只有圖片、PDF 與純文字,沒有一種會以 HTML 身分執行腳本。
+       * 第三種來源是 Word / 簡報轉好的 PDF(`/api/preview/…?as=pdf`,下面 `document` 那條):
+       * 後端那條一律以 `application/pdf` inline 送出,內容是 LibreOffice 轉出來的,不是使用者給的原檔。
        * ⚠️ **要往 `_INLINE_OK` 加副檔名之前先回來看這一段** —— 加了 html/svg
        * 就等於在同源、無沙箱的框裡執行別人上傳的腳本,而 token 就在 sessionStorage。
        */
-      <iframe src={item.previewUrl} title={item.name} {...stylex.props(styles.frame)} />
+      <PdfFrame src={item.previewUrl} title={item.name} />
     );
   }
+  if (item.mode === 'document') {
+    // 轉好的 PDF 走**同一個** PDF 框(上面那段 sandbox 的說明一樣適用)
+    return (
+      <DocumentPreview
+        item={item}
+        frame={(src) => <PdfFrame src={src} title={item.name} />}
+        fallback={<TextPreview item={item} />}
+      />
+    );
+  }
+  if (item.mode === 'sheet') {
+    return <SheetPreview item={item} fallback={<TextPreview item={item} />} />;
+  }
   return <TextPreview item={item} />;
+}
+
+function PdfFrame({src, title}: {src: string; title: string}) {
+  return <iframe src={src} title={title} {...stylex.props(styles.frame)} />;
 }
 
 function TextPreview({item}: {item: LightboxItem}) {

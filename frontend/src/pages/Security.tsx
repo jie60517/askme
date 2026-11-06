@@ -132,7 +132,15 @@ const EVENT_LABEL: Record<string, {label: string; danger?: boolean}> = {
    * 收回主機的 Bash 權限,而稽核紀錄是事後唯一查得到「誰給的」的地方。
    * 不標的話,權限變更會混在一堆無害事件裡滑過去。
    */
-  role_changed: {label: '職稱/權限變更', danger: true},
+  role_changed: {label: '角色變更', danger: true},
+  // 某人的權限加減、角色本身的增改刪。全部標紅 —— 都是在給或收回權限
+  perms_changed: {label: '個人權限變更', danger: true},
+  role_created: {label: '新增角色', danger: true},
+  role_renamed: {label: '角色改名'},
+  role_perms_changed: {label: '角色權限變更', danger: true},
+  role_deleted: {label: '刪除角色', danger: true},
+  // 有 Users 權限的一般帳號想動自己、或想給出 / 動到自己沒有的權限,被擋下
+  users_action_denied: {label: '帳號管理被擋下', danger: true},
   password_reset: {label: '重設密碼'},
   password_changed: {label: '修改密碼'},
   /*

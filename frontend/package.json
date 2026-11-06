@@ -11,8 +11,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@astryxdesign/core": "^0.4.4",
-    "@astryxdesign/theme-neutral": "^0.4.4",
+    "@astryxdesign/core": "^0.7.8",
+    "@astryxdesign/theme-neutral": "^0.7.8",
     "@fontsource/figtree": "^5.3.0",
     "@number-flow/react": "^0.6.2",
     "@stylexjs/stylex": "^0.19.0",
@@ -49,8 +49,8 @@
     "three": "^0.185.1"
   },
   "devDependencies": {
-    "@astryxdesign/build": "^0.4.4",
-    "@astryxdesign/cli": "^0.4.4",
+    "@astryxdesign/build": "^0.7.8",
+    "@astryxdesign/cli": "^0.7.8",
     "@stylexjs/unplugin": "^0.19.0",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.6",
@@ -60,6 +60,7 @@
     "@types/three": "^0.185.4",
     "@vitejs/plugin-react": "^6.0.5",
     "jsdom": "^29.1.1",
+    "lightningcss": "^1.33.0",
     "typescript": "^7.0.2",
     "vite": "^8.2.1",
     "vitest": "^4.1.11"

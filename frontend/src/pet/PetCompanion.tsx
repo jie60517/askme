@@ -28,7 +28,7 @@ import {
   petPositionKey,
   type PetState,
 } from "./pet-sprites";
-import { PET_SPEAK_EVENT, SPEECH_MS, type PetSpeech } from "./petSpeech";
+import { holdPetEars, PET_SPEAK_EVENT, SPEECH_MS, type PetSpeech } from "./petSpeech";
 import { getPetConfig, getPetSource, type PetConfig, type PetTask, type PetTool } from "./petSource";
 import { BLOB_SIZE_PX, BloubAvatar } from "./BloubAvatar";
 import { BLOUB_LOOKS } from "./bloubMap";
@@ -947,7 +947,10 @@ function useSpeech() {
       timerRef.current = window.setTimeout(() => setSpeech(null), SPEECH_MS);
     };
     window.addEventListener(PET_SPEAK_EVENT, onSpeak);
+    // 有吉祥物在聽,PetSpeechToast 就不發 toast(見 petSpeech.ts 的 holdPetEars)
+    const release = holdPetEars();
     return () => {
+      release();
       window.removeEventListener(PET_SPEAK_EVENT, onSpeak);
       if (timerRef.current) window.clearTimeout(timerRef.current);
     };

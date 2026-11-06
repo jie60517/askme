@@ -63,6 +63,16 @@ server {
         proxy_send_timeout 660s;
     }
 
+    # 對話頁的即時推送(@ 便條已讀):開著一組對話就連著 /api/conversations/{id}/live。
+    # 同上要 Upgrade;不套 limit_req(每換一組對話就一次握手)。後端每 25 秒送一則 ping。
+    location ~ ^/api/conversations/[A-Za-z0-9_-]+/live$ {
+        include /etc/nginx/snippets/askme-proxy.conf;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 660s;
+        proxy_send_timeout 660s;
+    }
+
     location /api/login {
         limit_req zone=login burst=5 nodelay;
         include /etc/nginx/snippets/askme-proxy.conf;

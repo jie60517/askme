@@ -439,7 +439,8 @@ def test_patch_user_rejects_a_misspelled_role():
             json={"role": "Software Engineer"},  # 大寫 E —— 就差這一個字母
             headers=admin,
         )
-        assert bad.status_code == 422, "打錯大小寫的職稱必須被擋下來"
+        # 角色存在資料庫:找不到的角色(含打錯大小寫)是 400「找不到這個角色」
+        assert bad.status_code == 400, "打錯大小寫的職稱必須被擋下來"
 
         # 擋下來之後資料庫要沒被動到
         assert _role_in_db("role-typo-user") != "Software Engineer"
@@ -453,12 +454,9 @@ def test_patch_user_rejects_a_misspelled_role():
         assert users.role_grants_full(_role_in_db("role-typo-user")) is True
 
 
-def test_patch_user_still_allows_clearing_the_role():
-    """空字串 = 清掉職稱,這條契約不能被 Literal 收掉。
-
-    路由靠 `model_fields_set` 分辨「沒帶」跟「帶了空的」,清掉會存 NULL、
-    讀的那側退回 DEFAULT_ROLE。網頁的下拉到不了這條路,但 API 的契約是這樣。
-    """
+def test_patch_user_rejects_an_empty_role():
+    """每個帳號一定有角色:空字串不代表「清掉職稱」,
+    空字串是 422,資料庫不動(要回到預設角色就直接選它)。"""
     users.create_user("role-clear-user", role=users.ROLE_ENGINEER)
     admin = {"Authorization": f"Bearer {auth._issue(config.ADMIN_USERNAME)}"}
 
@@ -466,6 +464,6 @@ def test_patch_user_still_allows_clearing_the_role():
         resp = client.patch(
             "/api/users/role-clear-user", json={"role": ""}, headers=admin
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 422
 
-    assert _role_in_db("role-clear-user") in (None, "")
+    assert _role_in_db("role-clear-user") == users.ROLE_ENGINEER

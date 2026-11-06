@@ -41,14 +41,14 @@ claude 跑一題動輒幾分鐘、跨模組的問題十幾分鐘,所以使用者
 > 改了 models 的欄位,已經在跑的資料庫要自己 `ALTER TABLE`(開發時也可以直接刪掉
 > `backend/data/app.db` 讓它重建)。加一張新表則不用做任何事。
 
-- **`users.role`** —— 畫面上的職稱(@ 選單名字底下那行副標)。nullable,
-  沒設過的在讀的那側退回 `users.DEFAULT_ROLE`("Consultant")。
-
-  ⚠️ **職稱就是權限**:`role` 是唯一來源,`tools` 由 `users.role_grants_full()`
-  推導、只是給 `agent.py` 讀的快取欄位。**不要從別的地方寫 `tools`** ——
-  兩個地方都能寫就一定會不一致,而不一致的那一面是「畫面顯示 Consultant、
-  實際上有 Bash」。管理員另外看 `ADMIN_USERNAME`(他不在 users 表裡)。
-  回歸測試在 `backend/tests/test_users_role.py`。
+- **角色與權限(`backend/app/roles.py`)** —— 帳號管理頁的「角色」分頁可以新增角色,每個角色勾選能用哪些功能:
+  SSH Server(底下是 Work Flow)、Usage、Security、Users、AI 可執行指令(Bash 與寫入)。
+  權限目錄寫死在程式裡(每一項背後都有一段真的擋人的程式),角色存在 `roles` 表;
+  `users.role` 存角色的 id,空的或對不上的退回預設角色 Consultant(它不能刪)。
+  **實際權限 = 角色的值 + 這個人的個人加減**(`users.perm_overrides`,只存跟角色不同的那幾項)。
+  每次都查資料庫、不快取:改了角色,下一個請求就生效。管理員不在 users 表,一律全開。
+  有 Users 權限的一般帳號給不出自己沒有的權限,也動不了權限比自己大的人(`admin_users._guard`)。
+  ⚠️ `users.tools` 是舊欄位,不再給任何權限。回歸測試在 `backend/tests/test_roles.py`。
 
 ## 怎麼確定回答真的根據程式碼
 
@@ -250,7 +250,7 @@ allow 規則不改變模型看到的工具定義,不進前綴。
 `Read` / `Grep` / `Glob` 碰得到的範圍是「工作目錄底下」加上「`--add-dir` 掛進來的那幾條」
 (唯讀帳號再加上路徑限定)。**`Bash` 不吃 `--add-dir`** —— `config.py` 把這件事當成**安全**
 風險寫下來了:給了 Bash 就等於給了那個帳號「以服務身分讀寫主機上任何東西」。
-所以 Bash 只在 `ALLOWED_TOOLS_FULL`(職稱 Software engineer 與管理員)裡,
+所以 Bash 只在 `ALLOWED_TOOLS_FULL`(有「AI 可執行指令」權限的人與管理員)裡,
 也不要用 `Bash(find:*)` 這種寫法「只開一點點」(`find -exec` 照樣能跑任何指令)。
 
 就算有 Bash,讀檔也要走 `Read` / `Grep`。這條寫在規則層(`RULES-web-context.md` 的
@@ -661,7 +661,7 @@ HTML5 的 draggable 在手機瀏覽器上等於沒有,而且對話列本身是�
 
 ## SSH 終端機:側邊欄的 SSH Server
 
-工程師(職稱 Software engineer)與管理員的側邊欄多一列 `SSH Server`(`/ssh`),點主機就以
+有 SSH Server 權限的人(種子角色裡是 Software engineer)與管理員的側邊欄多一列 `SSH Server`(`/ssh`),點主機就以
 `.env` 裡設定的帳號連進去,畫面是 xterm.js 終端機 + 左邊一欄 SFTP 檔案(拖拉上傳、下載、刪除)。
 不用的話 `.env` 不填憑證就不會出現。沒有 `backend/terminal_hosts.json` 時清單上只有一台,名字叫「主機」
 (就是 `.env` 的 `SSH_TERMINAL_*` 那一台,id = `main`);要多台再照 `backend/terminal_hosts.example.json`
@@ -685,8 +685,8 @@ asyncssh 是純 Python,所以整段橋接在 Windows 開發機上就能對著一
 再用 `ssh-keyscan` 產一份 known_hosts(服務**只認這份**,對不上就拒連)。Docker 版兩個檔都放進
 `deploy/docker/ssh/`(步驟見那裡的 README)。金鑰與密碼都沒設 = 功能視為關閉:開機 warning 一次、側邊欄不顯示那一列。
 
-**權限與稽核。** 能不能開終端機跟 Bash 權限是**同一個來源**(`auth.can_use_terminal` → `users.is_power_user`):
-改職稱就同時給 / 收回。憑證放在 .env 之後,網站登入(帳密 + MFA)就是唯一一道門,所以這一條與稽核比什麼都重要:
+**權限與稽核。** 能不能開終端機看角色的 SSH Server 權限(`auth.can_use_terminal`);開著的連線每隔一下重問一次,
+權限被拿掉就收線。憑證放在 .env 之後,網站登入(帳密 + MFA)就是唯一一道門,所以這一條與稽核比什麼都重要:
 WebSocket 的第一個訊息要帶 token、`Origin` 要跟 Host 同一台、沒有權限的帳號直接連會拿到 4403 + 一筆 `terminal_denied`。
 稽核記 `terminal_connect` / `terminal_disconnect`(含持續秒數與結束原因)/ `terminal_file_upload` /
 `terminal_file_delete` 等;**不記鍵盤輸入與畫面內容**(那會把 `su` 密碼一起記進去),也不記下載與列目錄。
@@ -731,7 +731,7 @@ cp backend/workflow_actions.example.json backend/workflow_actions.json
 # sync(rsync,一定要有 {delete});然後重啟服務
 ```
 
-重啟之後工程師 / 管理員的側邊欄就會多一列 Work Flow。瀏覽器永遠送不了指令:每塊拼圖跑什麼只寫在這個檔,
+重啟之後有 Work Flow 權限的人(要先有 SSH Server)與管理員的側邊欄就會多一列 Work Flow。瀏覽器永遠送不了指令:每塊拼圖跑什麼只寫在這個檔,
 畫面上只能選清單裡的哪一個、填目錄或腳本路徑(後端先過白名單)。這個檔**不進版控**、裡面不放密碼;
 沒有這個檔的時候 `/api/workflows` 一律 404、排程器不啟動、`/workflow` 是找不到頁面。
 欄位說明寫在範本檔的 `_comment`。

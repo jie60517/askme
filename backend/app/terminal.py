@@ -905,8 +905,8 @@ async def run_session(session: Session, transport: Transport) -> str:
         兩個問題各擋一種情況,**都要問**:
           `auth.username_for` —— token 還在不在(登出、改密碼、停用、重設、刪除
             都會走 `revoke_all_for`),以及 `AUTH_TOKEN_TTL_SEC` 那個絕對上限到了沒。
-          `auth.can_use_terminal` —— 身分還夠不夠(職稱改成沒有完整權限的、帳號被停用)。
-            這一支是**後盾**:上面那些路徑理論上都會撤 token,但「改職稱」哪天忘了撤,
+          `auth.can_use_terminal` —— 身分還夠不夠(角色或個人權限拿掉了 SSH Server、帳號被停用)。
+            這一支是**後盾**:上面那些路徑理論上都會撤 token,但「改權限」不會撤,
             這裡照樣收得掉。權限判斷跟握手那一刻走同一支,不另寫一份。
 
         ⚠️ 問 `username_for` 會**推後閒置計時**,那是刻意的 —— 理由寫在它的說明裡

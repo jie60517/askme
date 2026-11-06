@@ -332,7 +332,7 @@ export function AvatarCropper({
             isLabelHidden
             valueDisplay="none"
             orientation="vertical"
-            xstyle={styles.zoomSlider}
+            containerXstyle={styles.zoomSlider}
             /* ⚠️ `formatValue` 不能省:Astryx 拿它填 `aria-valuetext`,
                少了它報讀軟體念的是沒有單位的 1.35。 */
             formatValue={(z: number) => `${Math.round(z * 100)}%`}

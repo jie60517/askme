@@ -7,6 +7,7 @@
 import {createContext, useCallback, useContext, useEffect, useState} from 'react';
 
 import {api} from './api';
+import type {PermFlag, Perms} from './adminApi';
 import {
   dropTokenSilently,
   getToken,
@@ -34,6 +35,10 @@ export type Me = {
   companion_color?: string | null;
   /** 工程師 / 管理員,而且 SSH 終端機有開(後端 `can_use_terminal`)。Work Flow 能不能用看它;真正的擋在後端。 */
   can_terminal?: boolean;
+  /** 要不要畫吉祥物。沒設過後端回 true;舊後端沒這欄 = undefined(不動本機那份),見 `lib/companionPref.ts` */
+  companion_visible?: boolean;
+  /** 改過的快捷鍵(`lib/shortcuts.ts` 的 ShortcutOverrides 形狀,前端會再清一次)。null = 全部照預設 */
+  shortcuts?: unknown;
   /**
    * Work Flow 開了沒(後端 `workflows.available`):部署的人放了 `workflow_actions.json`,而且 SSH 終端機有開。
    * 關著:側邊欄沒有 Work Flow、`/workflow` 是 NotFound、`/api/workflows` 一律 404。
@@ -49,7 +54,24 @@ export type Me = {
    * 關著:側邊欄沒有 Notes、`/notes` 回首頁、對話裡沒有存筆記的鈕。後端那組 API 也是 404。
    */
   can_notebook?: boolean;
+  /**
+   * 實際權限(角色 + 個人加減;管理員全開)。側邊欄每一項、每個管理頁的進入都看它。
+   * SSH 終端機整個沒開時後端已經把 `ssh` / `workflow` 算成沒有。前端**只拿它決定顯不顯示**;真正的擋在後端。
+   * 舊後端沒有這一欄 —— 用 `hasPerm`,不要直接讀。
+   */
+  perms?: Perms;
 };
+
+/**
+ * 這個人有沒有這項權限。舊後端沒回 `perms` 時退回舊欄位(管理員全開、`can_terminal`),
+ * 上版的那幾分鐘舊分頁不會整排選單消失。
+ */
+export function hasPerm(me: Me, key: PermFlag): boolean {
+  if (me.perms) return me.perms[key];
+  if (me.is_admin) return true;
+  if (key === 'ssh' || key === 'workflow') return !!me.can_terminal;
+  return false;
+}
 
 export function useIdentity() {
   const [me, setMe] = useState<Me | null>(null);

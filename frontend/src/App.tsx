@@ -39,7 +39,6 @@ import {LinkProvider} from '@astryxdesign/core/Link';
 import {Theme} from '@astryxdesign/core/theme';
 import {neutralTheme} from '@astryxdesign/theme-neutral/built';
 import {AccountSettingsDialog} from './components/AccountSettingsDialog';
-import {ChangePasswordDialog} from './components/ChangePasswordDialog';
 import {CommandPalette} from './components/CommandPalette';
 import {ErrorBoundary} from './components/ErrorBoundary';
 import {JumpSpotlight} from './components/JumpSpotlight';
@@ -58,7 +57,15 @@ import {isStale, subscribeStale} from './lib/appVersion';
 import {wouldLoseWork} from './lib/unsavedWork';
 import {lazyChunk} from './lib/lazyChunk';
 import {adoptServerPrefs} from './lib/displayPrefs';
-import {adoptServerBlobColor, adoptServerBlobShape, adoptServerCompanion} from './lib/companionPref';
+import {
+  adoptServerBlobColor,
+  adoptServerBlobShape,
+  adoptServerCompanion,
+  adoptServerCompanionVisible,
+  useCompanionVisible,
+} from './lib/companionPref';
+import {setShortcutOverrides, useShortcut} from './lib/shortcuts';
+import {PetSpeechToast} from './components/PetSpeechToast';
 import {adoptServerModel} from './lib/modelPref';
 import {MOBILE_QUERY, useMediaQuery} from './lib/media';
 import {registerSelf} from './lib/peopleDirectory';
@@ -69,7 +76,8 @@ import {NoticeStack} from './components/NoticeStack';
 // 小夥伴的接線(pet-companion-kit):模組層執行 configure,一定要在元件掛上前 import
 import {setPetUnread} from './lib/petSetup';
 import {startSharedWatch} from './lib/sharedWatch';
-import {MeProvider, useIdentity, type Me} from './lib/useIdentity';
+import {hasPerm, MeProvider, useIdentity, type Me} from './lib/useIdentity';
+import type {PermFlag} from './lib/adminApi';
 
 
 // 只有 Chat 是同步 import —— 它是打開網站第一眼看到的畫面,
@@ -301,8 +309,12 @@ function BootHandoff({booting}: {booting: boolean}) {
   );
 }
 
-function AdminOnly({me, children}: {me: Me; children: React.ReactNode}) {
-  if (!me.is_admin) return <Navigate to="/" replace />;
+/**
+ * 要有這項權限才進得來(角色 + 個人加減;管理員全開)。沒有就回首頁。
+ * 後端每一支端點自己會擋(auth.require_perm),這裡只是不讓人看到一頁 403。
+ */
+function PermOnly({me, perm, children}: {me: Me; perm: PermFlag; children: React.ReactNode}) {
+  if (!hasPerm(me, perm)) return <Navigate to="/" replace />;
   return <>{children}</>;
 }
 
@@ -353,15 +365,35 @@ function Chrome({me, onIdentityChanged}: {me: Me; onIdentityChanged: () => void}
    */
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   /*
-   * 「改密碼」與「個人設定」也掛在這一層,不放在側邊欄裡:
+   * 「個人設定」(改密碼也在裡面)也掛在這一層,不放在側邊欄裡:
    * 手機版側邊欄在抽屜裡,點選單項目抽屜一關、裡面跟著卸掉,對話框就不會出現。
    */
-  const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   // 手機斷點跟 AppShell 切抽屜的那條線同一條(見 lib/media.ts)
   const isMobile = useMediaQuery(MOBILE_QUERY);
   // 小夥伴的 viewKey(換頁時要立刻重算「這頁有沒有事在跑」)
   const {pathname} = useLocation();
+  // Settings → Companion → Show companion
+  const companionVisible = useCompanionVisible();
+  /*
+   * Settings → Keyboard shortcuts 的 New chat(預設 Ctrl+Shift+O,`lib/shortcuts.ts`)。
+   * 走跟側邊欄 New chat 那個連結同一套換頁(`AppLink` 的 onClick):舊版就整頁換、對話之間演輸入框滑過去、
+   * 功能頁之間演淡換。已經在 New chat 就不動。
+   */
+  const navigate = useNavigate();
+  useShortcut('new_chat', () => {
+    if (pathname === '/') return;
+    if (isStale() && !wouldLoseWork()) {
+      window.location.assign('/');
+      return;
+    }
+    if (shouldMorphChat(pathname, '/')) {
+      void morphChat(() => navigate('/'));
+      return;
+    }
+    if (shouldSwapPage(pathname, '/')) startPageSwap('/');
+    navigate('/');
+  });
   /*
    * **換頁不斷線**:SSH 連著也能去別頁問問題。
    * SSH 頁第一次打開之後就**一直掛著**,換到別頁只是藏起來(`sshAway`):連線、檔案欄、AskME 都留著,
@@ -396,7 +428,6 @@ function Chrome({me, onIdentityChanged}: {me: Me; onIdentityChanged: () => void}
         <Sidebar
           me={me}
           onOpenSearch={() => setIsSearchOpen(true)}
-          onOpenChangePassword={() => setIsChangingPassword(true)}
           onOpenSettings={() => setIsSettingsOpen(true)}
         />
       }
@@ -421,9 +452,9 @@ function Chrome({me, onIdentityChanged}: {me: Me; onIdentityChanged: () => void}
           <Route
             path="/stats"
             element={
-              <AdminOnly me={me}>
+              <PermOnly me={me} perm="usage">
                 <Stats />
-              </AdminOnly>
+              </PermOnly>
             }
           />
           {/* 明細在總覽底下一層:總覽回答「多不多」,這一頁回答「為什麼這麼貴」。
@@ -431,25 +462,25 @@ function Chrome({me, onIdentityChanged}: {me: Me; onIdentityChanged: () => void}
           <Route
             path="/stats/questions"
             element={
-              <AdminOnly me={me}>
+              <PermOnly me={me} perm="usage">
                 <Questions />
-              </AdminOnly>
+              </PermOnly>
             }
           />
           <Route
             path="/security"
             element={
-              <AdminOnly me={me}>
+              <PermOnly me={me} perm="security">
                 <Security />
-              </AdminOnly>
+              </PermOnly>
             }
           />
           <Route
             path="/users"
             element={
-              <AdminOnly me={me}>
+              <PermOnly me={me} perm="users">
                 <Users />
-              </AdminOnly>
+              </PermOnly>
             }
           />
           {/* SSH 終端機。沒權限的人不導走 —— 頁面自己顯示「只開放給工程師」,
@@ -517,11 +548,13 @@ function Chrome({me, onIdentityChanged}: {me: Me; onIdentityChanged: () => void}
         `styles/pet-shim.css`)留著當第二道 —— 那條是 `min-width: 768px`、
         這條是 `max-width: 768px`,剛好 768px 寬時兩邊會同時成立,以這裡為準。
       */}
-      {!isMobile && (
+      {!isMobile && companionVisible && (
         <Suspense fallback={null}>
           <PetCompanion viewKey={pathname} />
         </Suspense>
       )}
+      {/* 吉祥物沒在聽(Settings 關掉了、手機本來就不畫、或還在載入)時,它要講的 @ 提及、分享、額度改發 toast */}
+      <PetSpeechToast />
       {/* 從檔案區跳到某一則之後,在那一則周圍繞一圈彩虹。
           常駐但平常不畫東西(沒在圈的時候整個 return null),純 CSS,沒有動態載入 */}
       <JumpSpotlight />
@@ -532,8 +565,7 @@ function Chrome({me, onIdentityChanged}: {me: Me; onIdentityChanged: () => void}
         開關放在這一層是因為兩個入口都要動它。
       */}
       <CommandPalette isOpen={isSearchOpen} onOpenChange={setIsSearchOpen} />
-      <ChangePasswordDialog isOpen={isChangingPassword} onOpenChange={setIsChangingPassword} />
-      {/* 個人設定(頭像 / 字級 / 對比)。⚠️ 用 `key` 讓每次打開都重新掛載 ——
+      {/* 個人設定(頭像、改密碼、深淺色、字級、對比、模型、吉祥物)。⚠️ 用 `key` 讓每次打開都重新掛載 ——
           拉桿的初始值只在掛載時從 displayPrefs 取一次,不重新掛的話
           第二次打開會看到上一次打開時的數字。 */}
       <AccountSettingsDialog
@@ -598,6 +630,14 @@ export function App() {
   useEffect(() => {
     if (me?.username) adoptServerBlobColor(me.companion_color);
   }, [me?.username, me?.companion_color]);
+  useEffect(() => {
+    if (me?.username) adoptServerCompanionVisible(me.companion_visible);
+  }, [me?.username, me?.companion_visible]);
+  /* 快捷鍵同上(`lib/shortcuts.ts`)。依賴用字串:`me` 每次 refresh 都是新物件,內容沒變不要重套 */
+  const serverShortcuts = me?.username && me.shortcuts !== undefined ? JSON.stringify(me.shortcuts) : undefined;
+  useEffect(() => {
+    if (serverShortcuts !== undefined) setShortcutOverrides(JSON.parse(serverShortcuts));
+  }, [serverShortcuts]);
 
   /*
    * 把自己併進同事名冊 —— `/api/shareable-users` 刻意不含自己,不併的話

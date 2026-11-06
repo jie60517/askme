@@ -36,9 +36,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # /usr/bin/python3:hook 與腳本習慣寫這個路徑,image 的 python 在 /usr/local/bin。
 # poppler-utils:claude 的 Read 讀大份的 PDF、或指定頁數讀,是叫 pdftoppm 把頁面轉成圖;沒有它只讀得了小份的。
 # poppler-data 是 CJK 的 CMap,中文 PDF 要它才轉得對;它只是 recommends,--no-install-recommends 不會自己帶。
+# LibreOffice + 中文字型:Word / 簡報預覽轉 PDF(officepreview.py)。只裝 writer / calc / impress 的 -nogui,
+# 不帶桌面那一大包;沒有 fonts-noto-cjk 中文會變方塊。
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       ca-certificates curl git less openssh-client procps ripgrep poppler-utils poppler-data \
+      libreoffice-writer-nogui libreoffice-calc-nogui libreoffice-impress-nogui fonts-noto-cjk \
  && rm -rf /var/lib/apt/lists/* \
  && ln -s /usr/local/bin/python3 /usr/bin/python3
 

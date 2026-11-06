@@ -27,6 +27,15 @@ const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.a
 const OFFICE_EXT = new Set(['.docx', '.xlsx', '.pptx']);
 
 /**
+ * 預覽時轉成 PDF 看的(Word / 簡報,後端 `officepreview.to_pdf`)。
+ * 舊的 `.doc` / `.ppt` 也收:LibreOffice 轉得了,不轉的話它們只能下載。
+ */
+const DOCUMENT_EXT = new Set(['.docx', '.pptx', '.doc', '.ppt', '.odt', '.odp']);
+
+/** 預覽時畫成表格的(Excel,後端 `officepreview.sheets`)。 */
+const SHEET_EXT = new Set(['.xlsx', '.xlsm', '.xls']);
+
+/**
  * 一定**不是**文字的副檔名。
  *
  * ⚠️ 文字用**排除法**,不是列舉。需求正是「能用記事本打開的都給我看」,
@@ -60,6 +69,14 @@ export function isPdfFilename(name: string): boolean {
 
 export function isOfficeFilename(name: string): boolean {
   return OFFICE_EXT.has(ext(name));
+}
+
+export function isDocumentFilename(name: string): boolean {
+  return DOCUMENT_EXT.has(ext(name));
+}
+
+export function isSheetFilename(name: string): boolean {
+  return SHEET_EXT.has(ext(name));
 }
 
 /**

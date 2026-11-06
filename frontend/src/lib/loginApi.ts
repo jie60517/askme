@@ -7,6 +7,7 @@ import {api} from './api';
 import {clearToken} from './auth';
 import type {ShapeId} from '../pet/bloub/skins';
 import type {BlobColor, Companion} from './companionPref';
+import type {ShortcutOverrides} from './shortcuts';
 import {resetConversationsCache} from './conversationsApi';
 import {resetPeopleDirectory} from './peopleDirectory';
 import {clearDrafts} from './noteDraft';
@@ -89,6 +90,24 @@ export async function savePreferredModel(model: string): Promise<void> {
 export async function saveCompanion(companion: Companion): Promise<void> {
   try {
     await api.put('/api/me/prefs', {companion});
+  } catch {
+    // 忽略
+  }
+}
+
+/** 要不要畫吉祥物。失敗靜默,理由同 `saveCompanion`。 */
+export async function saveCompanionVisible(visible: boolean): Promise<void> {
+  try {
+    await api.put('/api/me/prefs', {companion_visible: visible});
+  } catch {
+    // 忽略
+  }
+}
+
+/** 改過的快捷鍵,每次送**整份**(`{}` = 全部回預設)。失敗靜默,理由同 `saveCompanion`。 */
+export async function saveShortcuts(overrides: ShortcutOverrides): Promise<void> {
+  try {
+    await api.put('/api/me/prefs', {shortcuts: overrides});
   } catch {
     // 忽略
   }

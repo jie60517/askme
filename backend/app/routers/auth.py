@@ -2,7 +2,7 @@ from typing import Union
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 
-from .. import audit, auth, config, geo_allow, geoip, mfa, ratelimit, schemas, users, workflows
+from .. import audit, auth, config, geo_allow, geoip, mfa, ratelimit, roles, schemas, users, workflows
 
 MIN_PASSWORD_LEN = 6
 
@@ -238,6 +238,10 @@ def me(request: Request, response: Response, authorization: str = Header(default
         )
 
     prefs = users.get_prefs(username)
+    # 實際權限。SSH 終端機整個功能沒開時,SSH Server 與 Work Flow 對畫面來說都等於沒有
+    perms = auth.perms_for(username) if username else dict(roles.NONE)
+    if not config.ssh_terminal_available():
+        perms = {**perms, "ssh": False, "workflow": False}
     can_terminal = config.ssh_terminal_available() and auth.can_use_terminal(username)
     return schemas.MeResponse(
         username=username,
@@ -254,8 +258,11 @@ def me(request: Request, response: Response, authorization: str = Header(default
         companion_color=prefs["companion_color"],
         can_terminal=can_terminal,
         ssh_mode="full" if can_terminal else "",
+        companion_visible=prefs["companion_visible"],
+        shortcuts=prefs["shortcuts"],
         can_notebook=config.NOTEBOOK_ENABLED,
         workflow_enabled=workflows.available(),
+        perms=schemas.Perms(**perms),
     )
 
 
@@ -281,6 +288,8 @@ def set_display_prefs(
         companion=req.companion,
         companion_shape=req.companion_shape,
         companion_color=req.companion_color,
+        companion_visible=req.companion_visible,
+        shortcuts=req.shortcuts,
     )
 
 

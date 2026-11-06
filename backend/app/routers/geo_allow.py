@@ -29,7 +29,7 @@ def _to_entry(row) -> schemas.GeoAllowEntry:
 @router.get(
     "/geo-allow",
     response_model=List[schemas.GeoAllowEntry],
-    dependencies=[Depends(auth.require_admin)],
+    dependencies=[Depends(auth.require_perm("security"))],
 )
 def list_geo_allow():
     return [_to_entry(row) for row in geo_allow.entries()]
@@ -42,7 +42,7 @@ def list_geo_allow():
 def add_geo_allow(
     req: schemas.GeoAllowRequest,
     request: Request,
-    actor: str = Depends(auth.require_admin),
+    actor: str = Depends(auth.require_perm("security")),
 ):
     try:
         row = geo_allow.add(req.ip, actor)
@@ -66,7 +66,7 @@ def add_geo_allow(
 def remove_geo_allow(
     req: schemas.GeoAllowRequest,
     request: Request,
-    actor: str = Depends(auth.require_admin),
+    actor: str = Depends(auth.require_perm("security")),
 ):
     """刪一條。
 

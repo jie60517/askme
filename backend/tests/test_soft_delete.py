@@ -146,6 +146,26 @@ def test_deleted_question_detail_leaks_nothing(record):
     assert detail["question"]["cost_usd"] == 1.25
 
 
+def test_question_detail_masks_steps_written_before_the_fix(record):
+    """修正之前,還在跑時被刪的那題會把流水帳原樣寫回來 —— 那些舊列明細頁也不能吐出來。"""
+    from datetime import datetime
+
+    db = SessionLocal()
+    db.get(models.QARecord, record).deleted_at = datetime.utcnow()
+    db.add(models.QAStep(qa_record_id=record, seq=1, turn=0, kind="tool", tool="Read",
+                         target="src/orders.py", target_full="/srv/app/src/orders.py"))
+    db.commit()
+    db.close()
+    with TestClient(app) as client:
+        admin = auth._issue(auth.config.ADMIN_USERNAME)
+        detail = client.get(
+            f"/api/stats/questions/{record}", headers={"Authorization": f"Bearer {admin}"}
+        ).json()
+
+    assert "orders.py" not in repr(detail) and "grep order_total" not in repr(detail)
+    assert len(detail["steps"]) == 2 and detail["repeats"] == []
+
+
 def test_owner_can_no_longer_see_it(record):
     """側邊欄、歷史、續問全部走 `visible_to` —— 刪掉的要一條都看不到。"""
     with TestClient(app) as client:
@@ -171,3 +191,57 @@ def test_deleted_conversation_cannot_be_resumed(record):
     db = SessionLocal()
     assert shares.owner_of(db, CONV) is None
     db.close()
+
+
+def _running(record_id):
+    """一題還在跑、記憶體裡已經有一步流水帳的 run(還沒寫進資料庫)。"""
+    from app import runs
+
+    run = runs.Run(SID, CONV, record_id, "這支程式在做什麼", owner=OWNER)
+    run.steps.append({"seq": 1, "turn": 0, "kind": "tool", "tool": "Read",
+                      "target": "erp/asf/4gl/asfp999.4gl",
+                      "target_full": "/srv/projects/test/erp/asf/4gl/asfp999.4gl", "detail": None})
+    runs.register(run)
+    return run
+
+
+def test_question_running_when_deleted_is_not_written_back(record):
+    """刪對話只會叫還在跑的那題停下,它收尾時才寫資料庫 —— 寫回去的話,刪掉的內容又出現在統計明細上。"""
+    from app.routers import ask
+
+    run = _running(record)
+    with TestClient(app) as client:
+        assert _delete_it(client) == 204
+    ask._finalize(run, {"answer": "寫到一半的答案", "success": False, "error": "已停止"})
+
+    db = SessionLocal()
+    row = db.get(models.QARecord, record)
+    steps = db.query(models.QAStep).filter(models.QAStep.qa_record_id == record).all()
+    db.close()
+    assert row.deleted_at is not None and row.answer == ""
+    # 記憶體裡那一步要寫進來(數字留著給統計),只是不帶它碰了什麼
+    assert [s.seq for s in steps] == [1]
+    assert steps[0].target is None and steps[0].target_full is None and steps[0].detail is None
+
+
+def test_deleted_conversation_runs_stay_hidden_after_someone_reuses_the_id(record):
+    """刪掉的 conversation_id 誰都能拿去重新發問、變成新擁有者;他不能因此看到舊的那題。"""
+    from fastapi import HTTPException
+
+    from app.routers import ask
+
+    _running(record)
+    with TestClient(app) as client:
+        assert _delete_it(client) == 204
+    db = SessionLocal()
+    db.add(models.QARecord(session_id="e" * 32, conversation_id=CONV, question="hi", answer="",
+                           owner="reclaimer", asked_by="reclaimer", status="done"))
+    db.commit()
+    try:
+        assert shares.owner_of(db, CONV) == "reclaimer"
+        for viewer in ("reclaimer", OWNER):
+            with pytest.raises(HTTPException):
+                ask._visible_run(SID, viewer, db)
+    finally:
+        db.close()
+

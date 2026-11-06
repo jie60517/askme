@@ -58,6 +58,26 @@ def test_md_轉成_pdf(out_dir):
     assert (out_dir / "流程.md").is_file()  # 原檔留著
 
 
+def test_pdf_中文用繁體的編碼(out_dir):
+    """MSung-Light 是繁體(Adobe-CNS1),編碼要配 UniCNS-UCS2-H。
+
+    reportlab 4.2.5 預設配成簡體的 UniGB-UCS2-H:Chrome 照樣畫得出來,但 pdftotext / mupdf
+    讀出來是亂碼 —— 從畫面上看不出來,所以釘在檔案內容上。
+    """
+    (out_dir / "流程.md").write_text("# 一般訂單維護作業\n\n說明文字", encoding="utf-8")
+    (out_dir / pdfgen.MANIFEST_NAME).write_text("流程.md\n", encoding="utf-8")
+    assert pdfgen.apply_pdf_manifest("s-1") == []
+    data = (out_dir / "流程.pdf").read_bytes()
+    assert b"UniCNS-UCS2-H" in data
+    assert b"UniGB-UCS2-H" not in data
+
+
+def test_pdf_帶中文的程式碼不用_Courier():
+    """Courier 沒有中文字形:原始碼的中文註解放進程式碼樣式會變成一排方塊。"""
+    assert "Courier" not in pdfgen._inline("`#No.7946 加傳多角貿易否`")
+    assert "Courier" in pdfgen._inline("`t400(1,'N')`")
+
+
 def test_pdf_清單裡的路徑只認檔名(out_dir):
     """讀別的地方的檔案是 copy manifest 的事,那邊才有來源白名單。"""
     (out_dir / pdfgen.MANIFEST_NAME).write_text("../../../etc/passwd\n", encoding="utf-8")

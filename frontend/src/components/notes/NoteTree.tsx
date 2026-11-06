@@ -31,7 +31,7 @@ import {VisuallyHidden} from '@astryxdesign/core/VisuallyHidden';
 import {MoreHorizontal} from 'lucide-react';
 
 import {listTitle, type NoteSummary} from '../../lib/notebookApi';
-import {ColorTag, fixedOrigin, HoverRegion, sideNavStyles, TITLE_INPUT_LIMIT} from '../sideNavParts';
+import {ColorTag, fixedOrigin, HoverRegion, nestGuideDepth, sideNavStyles, TITLE_INPUT_LIMIT} from '../sideNavParts';
 import {colorValue, isCustomColor, NO_COLOR_KEY} from '../sidebar-colors';
 import {useLongPressDrag} from '../useLongPressDrag';
 import {ColorPicker} from '../ColorPicker';
@@ -174,7 +174,8 @@ export function NoteTree({
 
   const ghostOrigin = drag ? fixedOrigin(rootRef.current?.parentElement ?? null) : {x: 0, y: 0};
 
-  const renderRow = (row: NoteSummary) => {
+  // depth:這一列在第幾層(最上層 = 0),子頁那條導引線要對準它的圖示
+  const renderRow = (row: NoteSummary, depth: number) => {
     const kids = children.get(row.id) ?? [];
     return (
       <Row
@@ -193,8 +194,8 @@ export function NoteTree({
         }
       >
         {kids.length ? (
-          <VStack gap={0.5} xstyle={sideNavStyles.nestGuide}>
-            {kids.map((k) => renderRow(k))}
+          <VStack gap={0.5} xstyle={sideNavStyles.nestGuide} style={nestGuideDepth(depth)}>
+            {kids.map((k) => renderRow(k, depth + 1))}
           </VStack>
         ) : undefined}
       </Row>
@@ -206,7 +207,7 @@ export function NoteTree({
       <HoverRegion isSuppressed={!!drag} pinnedRow={pinned}>
         <SideNav aria-label="Notes" xstyle={styles.nav}>
           <SideNavSection title="My notes" isHeaderHidden>
-            <VStack gap={0.5}>{(children.get(null) ?? []).map((r) => renderRow(r))}</VStack>
+            <VStack gap={0.5}>{(children.get(null) ?? []).map((r) => renderRow(r, 0))}</VStack>
           </SideNavSection>
         </SideNav>
       </HoverRegion>

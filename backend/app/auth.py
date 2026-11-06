@@ -5,7 +5,7 @@ from typing import Optional
 
 from fastapi import Cookie, Header, HTTPException, Response
 
-from . import config, users
+from . import config, roles, users
 
 #: token -> (使用者名稱, 絕對到期時間, 最後一次被用到的時間)。存在記憶體就夠,
 #: 服務重啟後大家重新登入。
@@ -116,6 +116,11 @@ def redeem_challenge(challenge: str) -> Optional[str]:
     if username is None:
         return None
     _pending.pop(challenge, None)
+    # 中間憑證是在密碼那一步發的,之後帳號可能已經被停用或刪掉 —— 換之前再看一次
+    if not is_admin(username):
+        entry = users.get(username)
+        if entry is None or entry.get("disabled"):
+            return None
     return _issue(username)
 
 
@@ -223,6 +228,29 @@ def is_admin(username: Optional[str]) -> bool:
     return bool(username) and username.strip().lower() == config.ADMIN_USERNAME.lower()
 
 
+def has_perm(username: Optional[str], key: str) -> bool:
+    """登入的這個人有沒有這項權限(`roles.FLAGS` 其中一項)。關卡都問這一支或 `require_perm`。
+
+    管理員一律有;其他人 = 角色 + 個人加減(`roles.user_perms`,停用的帳號什麼都沒有)。
+    每次都查資料庫、不快取:角色改了,下一個請求就生效。
+    """
+    if is_admin(username):
+        return True
+    return bool(username) and roles.user_perms(username).get(key) is True
+
+
+def perms_for(username: Optional[str]) -> dict:
+    """這個人實際的整份權限(管理員全開)。`/api/me` 與防升權比對用。"""
+    if is_admin(username):
+        return dict(roles.ALL)
+    return roles.user_perms(username)
+
+
+def can_workflow(username: Optional[str]) -> bool:
+    """Work Flow。`roles` 已經保證有它就一定有 SSH Server(流程會在主機上跑指令)。"""
+    return has_perm(username, "workflow")
+
+
 def display_name(username: Optional[str]) -> Optional[str]:
     if username is None:
         return None
@@ -232,13 +260,13 @@ def display_name(username: Optional[str]) -> Optional[str]:
 def allowed_tools_for(username: str) -> str:
     """這個帳號問問題時,claude 拿得到哪些工具。
 
-    管理員與資料庫 `users.tools = "full"` 的帳號拿完整工具組(含 Bash),
+    有「AI 可執行指令」(`ai_exec`)的人拿完整工具組(含 Bash),
     其他人唯讀。**判斷一律用登入身分,不能讓前端指定** —— 那等於把權限交給
     請求方自己填。
 
     沒對上任何放寬條件就落到最後一行的唯讀組 —— 預設值該是「最少權限」而不是「全開」。
     """
-    if is_admin(username) or users.is_power_user(username):
+    if has_perm(username, "ai_exec"):
         return config.ALLOWED_TOOLS_FULL
     return config.ALLOWED_TOOLS
 
@@ -246,12 +274,12 @@ def allowed_tools_for(username: str) -> str:
 def writable_dirs_for(username: Optional[str]) -> list[str]:
     """這個帳號問問題時,額外掛進 --add-dir 的可寫目錄。
 
-    只有 full 帳號(管理員 + tools:full)拿得到 —— 用途是讓他們把整理好的流程
+    只有「AI 可執行指令」的人拿得到 —— 用途是讓他們把整理好的流程
     累積回 flows/。唯讀帳號回空清單,而且他們也沒有全域 Write 工具,雙重擋住。
 
     跟 allowed_tools_for 一樣,判斷一律用登入身分,不能讓前端指定。
     """
-    if username and (is_admin(username) or users.is_power_user(username)):
+    if has_perm(username, "ai_exec"):
         return config.CLAUDE_FULL_EXTRA_DIRS
     return []
 
@@ -259,9 +287,7 @@ def writable_dirs_for(username: Optional[str]) -> list[str]:
 def can_use_terminal(username: Optional[str]) -> bool:
     """這個帳號能不能開側邊欄的 SSH 終端機(`/ssh`)。
 
-    跟 Bash 權限**同一個來源**:管理員,或職稱帶完整權限的帳號(`users.is_power_user`,
-    由 `users.role_grants_full` 推導)。不另開一套 —— 兩套遲早不一致,而不一致的那一面
-    是「畫面上看不到那一列、直接打網址卻連得進去」。
+    = 權限 SSH Server 有勾。主機終端機、檔案欄、AskME 都問這一支。
 
     停用的帳號一律 False(他本來就登不進來,這裡是第二道)。
     **只看身分,不看功能開沒開**:功能開關是 `config.ssh_terminal_available()`,
@@ -281,7 +307,7 @@ def terminal_denial(username: Optional[str]) -> Optional[str]:
         return "不存在"
     if entry.get("disabled"):
         return "已停用"
-    if not users.is_power_user(username):
+    if not has_perm(username, "ssh"):
         return "沒有終端機權限"
     return None
 
@@ -294,6 +320,9 @@ def revoke_all_for(username: str, keep_token: str = "") -> None:
     """
     for token in [t for t, (u, *_) in _tokens.items() if u == username and t != keep_token]:
         _tokens.pop(token, None)
+    # 還沒換成 token 的 MFA 中間憑證也算登入的一部分:停用、重設密碼之後不該還換得到
+    for challenge in [c for c, (u, _) in _pending.items() if u == username]:
+        _pending.pop(challenge, None)
 
 
 # ------------------------------------------------------------------ 依賴注入
@@ -400,6 +429,24 @@ def require_admin(authorization: str = Header(default="")) -> str:
         # 回 401 的話前端會把 token 清掉、把人踢回登入頁,他會以為自己密碼打錯。
         raise HTTPException(status_code=403, detail="這個頁面只有管理員能看")
     return username
+
+
+def require_perm(key: str):
+    """FastAPI 的 dependency:登入的人要有這項權限(`roles.FLAGS`),不然 403。回登入者本人。
+
+    跟 `require_user` 同一條規則(還在用預設密碼的人一律擋)。管理員一律過。
+    """
+    label = roles.LABELS[key]
+
+    def dep(authorization: str = Header(default="")) -> str:
+        username = require_user(authorization)
+        if not has_perm(username, key):
+            # 403 不是 401:他確實登入了,只是這一頁不給看(401 會讓前端把人踢回登入頁)
+            raise HTTPException(status_code=403, detail=f"你沒有 {label} 的權限")
+        return username
+
+    dep.__name__ = f"require_perm_{key}"
+    return dep
 
 
 def current_user(authorization: str = Header(default="")) -> Optional[str]:

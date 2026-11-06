@@ -7,7 +7,7 @@
  *   存檔、排程、按執行看動畫跑。
  *
  * - 內容中文、側邊欄那一列英文(跟 `/ssh` 同一個例外,見 `frontend/.claude/CLAUDE.md`)。
- * - 沒權限的人看到「只開放給工程師」,真正的擋在後端。
+ * - 沒權限的人看到「你沒有 Work Flow 的權限」,真正的擋在後端。
  * - 執行中的進度用輪詢:執行中每 `POLL_MS` 問一次,只拿新的事件。
  * - **還沒存的改動留在模組層的 `drafts`**:換到別的頁面再回來還在,關分頁才會不見
  *   (關分頁時瀏覽器會問,見 `beforeunload`)。
@@ -45,7 +45,7 @@ import {errorMessage} from '../lib/errors';
 import {toastError, toastInfo} from '../lib/toast';
 import {MOBILE_QUERY, useMediaQuery} from '../lib/media';
 import {registerBusySource} from '../lib/unsavedWork';
-import {useMe} from '../lib/useIdentity';
+import {hasPerm, useMe} from '../lib/useIdentity';
 import {
   createWorkflow,
   deleteWorkflow,
@@ -143,7 +143,7 @@ function freeSpot(graph: FlowGraph, at: {x: number; y: number}): {x: number; y: 
 
 export default function Workflow() {
   const me = useMe();
-  const canUse = !!me.can_terminal;
+  const canUse = hasPerm(me, 'workflow');
 
   if (!canUse) {
     return (
@@ -154,8 +154,8 @@ export default function Workflow() {
         <Stack xstyle={styles.denied}>
           <EmptyState
             icon={<Icon icon={Lock} size="lg" />}
-            title="這個功能只開放給工程師"
-            description="職稱是 Software engineer 的帳號才會在側邊欄看到 Work Flow。"
+            title="你沒有 Work Flow 的權限"
+            description="角色有 Work Flow 權限的帳號才會在側邊欄看到 Work Flow。"
           />
         </Stack>
       </VStack>

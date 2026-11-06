@@ -41,11 +41,14 @@ def _register_font() -> Tuple[str, List[str]]:
     一份中文整段空白的 PDF,而畫面上什麼提示都沒有 —— 他會以為是自己的閱讀器壞了。
     檔案照產(英數的部分還讀得到),但要附一句。
     """
-    from reportlab.pdfbase import pdfmetrics
-    from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+    from reportlab.pdfbase import cidfonts, pdfmetrics
 
+    # ⚠️ reportlab 4.2.5 的對照表把 MSung-Light(繁體,Adobe-CNS1)配成簡體的 UniGB-UCS2-H 編碼,
+    # 產出來的 PDF 在 Chrome 看得到,但 pdftotext / mupdf / 部分閱讀器讀出來是亂碼或整段空白。
+    # 建字型之前先把這一筆改成繁體的 UniCNS-UCS2-H(這版的 UnicodeCIDFont 不收 encoding 參數)
+    cidfonts.defaultUnicodeEncodings[CJK_FONT] = ("cht", "UniCNS-UCS2-H")
     try:
-        pdfmetrics.registerFont(UnicodeCIDFont(CJK_FONT))
+        pdfmetrics.registerFont(cidfonts.UnicodeCIDFont(CJK_FONT))
         return CJK_FONT, []
     except Exception:  # noqa: BLE001 —— 字型註冊失敗不該讓整份文件產不出來
         logger.warning("CJK 字型註冊失敗,PDF 會用 Helvetica(中文不會顯示)")
@@ -59,8 +62,18 @@ def _inline(text: str) -> str:
     """行內語法 → reportlab 的迷你標記。**先跳脫再換**,順序反了會被當成標籤。"""
     out = html.escape(text, quote=False)
     out = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", out)
-    out = re.sub(r"`([^`]+)`", r'<font face="%s">\1</font>' % MONO_FONT, out)
+    # 帶中文的程式碼片段(原始碼的中文註解常被引用)不換成 Courier:它沒有中文字形,會變成一排方塊
+    out = re.sub(
+        r"`([^`]+)`",
+        lambda m: m.group(1) if _has_cjk(m.group(1)) else '<font face="%s">%s</font>' % (MONO_FONT, m.group(1)),
+        out,
+    )
     return out
+
+
+def _has_cjk(text: str) -> bool:
+    """有沒有 Courier 畫不出來的字(中日韓文字與全形標點都在 U+2E80 之後)。"""
+    return any(ord(ch) > 0x2E7F for ch in text)
 
 
 def _styles(font: str):
@@ -75,6 +88,12 @@ def _styles(font: str):
         ),
         "code": ParagraphStyle(
             "code", parent=base["Normal"], fontName=MONO_FONT, fontSize=9, leading=12,
+            leftIndent=10, backColor=colors.HexColor("#F4F4F4"), borderPadding=5,
+            spaceAfter=8,
+        ),
+        # 有中文的程式碼區塊用中文字型(Courier 沒有中文字形);對齊會差一點,但字讀得到
+        "code_cjk": ParagraphStyle(
+            "code_cjk", parent=base["Normal"], fontName=font, fontSize=9, leading=12,
             leftIndent=10, backColor=colors.HexColor("#F4F4F4"), borderPadding=5,
             spaceAfter=8,
         ),
@@ -142,7 +161,8 @@ def _flowables(block: md.Block, styles, font: str, width: float) -> list:
         text = "<br/>".join(
             html.escape(b, quote=False).replace(" ", "&nbsp;") for b in block.lines
         )
-        return [Paragraph(text or "&nbsp;", styles["code"])]
+        style = styles["code_cjk"] if any(_has_cjk(b) for b in block.lines) else styles["code"]
+        return [Paragraph(text or "&nbsp;", style)]
     if isinstance(block, md.Table):
         return [_table(block.rows, styles, width), Spacer(1, 8)]
     if isinstance(block, md.Bullets):

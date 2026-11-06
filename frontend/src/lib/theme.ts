@@ -26,7 +26,7 @@ const KEY = 't100_theme';
  * 選單一關就會重畫)就會讀到新佈景,把新色的圖表 / 終端機 / 圖示畫進「舊」那張快照裡。
  */
 let current: ThemeMode = read();
-/** 使用者**想要**的那一個(最後一次 setTheme / 跨分頁同步給的)。只拿來判斷「要不要換」與切換的下一個 */
+/** 使用者**想要**的那一個(最後一次 setTheme / 跨分頁同步給的)。只拿來判斷「要不要換」 */
 let target: ThemeMode = current;
 /**
  * 每次改 `target` 就 +1。過場的 update 是非同步的:它跑的時候若已經不是最新的那一次
@@ -143,16 +143,16 @@ async function saveTheme(mode: ThemeMode): Promise<void> {
 }
 
 /**
- * 使用者自己切換。
+ * 使用者自己選定某一個(設定裡 Appearance 那排 Light / Dark)。
  *
  * **只有這條路會寫回伺服器** —— adoptServerTheme 走 setTheme,
  * 如果 setTheme 自己就存的話,採用伺服器的值會馬上再把同一個值 PUT 回去。
+ * 已經是想要的那一個(以 `target` 為準)就什麼都不做,也不重送。
  */
-export function toggleTheme() {
-  // 以 `target` 為準:過場還沒換過去之前再按一次,要切回去,不是再切一次同一個
-  const next: ThemeMode = target === 'dark' ? 'light' : 'dark';
-  setTheme(next);
-  void saveTheme(next);
+export function chooseTheme(mode: ThemeMode) {
+  if (mode === target) return;
+  setTheme(mode);
+  void saveTheme(mode);
 }
 
 /**

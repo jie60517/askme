@@ -94,6 +94,36 @@ def test_agent_sends_the_question_on_stdin(monkeypatch, tmp_path):
     assert fake.kwargs["stdin"] == asyncio.subprocess.PIPE
     assert fake.stdin_text.startswith(QUESTION)
     _assert_not_on_command_line(fake.argv, "-259", "orders.py")
+    assert fake.kwargs["env"]["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] == "1"
+
+
+def test_question_cannot_trigger_cli_prompt_features(tmp_path, monkeypatch):
+    """`@路徑` 會被 CLI 展開成檔案內容(不經過工具權限),開頭的 `/` 會被當成斜線指令。"""
+    monkeypatch.setattr(config, "UPLOAD_DIR", tmp_path / "uploads")
+    monkeypatch.setattr(config, "OUTPUT_DIR", tmp_path / "outputs")
+    (tmp_path / "uploads" / "s-1").mkdir(parents=True)
+    (tmp_path / "uploads" / "s-1" / "@x.docx.txt").write_text("內容", encoding="utf-8")
+    prompt = agent.build_prompt("/help 看一下 @/etc/hosts 還有。@/etc/passwd", "s-1", ["@x.docx", "y @z.png"])
+    assert prompt.startswith(agent.QUESTION_LEAD + "/help")
+    assert "@/etc/hosts" not in prompt and "＠/etc/hosts" in prompt
+    assert "。＠/etc/passwd" in prompt
+    assert "上傳了檔案 ＠x.docx" in prompt and "y ＠z.png" in prompt
+
+
+def test_at_signs_inside_a_word_are_left_alone():
+    """CLI 只認詞首的 @。`表名@dblink`、email 照原樣給模型,不然它會拿全形去 grep。"""
+    assert agent.inert_for_cli("select * from ima_file@tiptop") == "select * from ima_file@tiptop"
+    assert agent.inert_for_cli("寄給 jie@example.com") == "寄給 jie@example.com"
+    assert agent.inert_for_cli("@a b\n@c") == "＠a b\n＠c"
+    # CLI 是 JS,它的 \s 含 ﻿、全形空白也算
+    assert agent.inert_for_cli("a﻿@/etc/passwd　@/etc/hosts") == "a﻿＠/etc/passwd　＠/etc/hosts"
+
+
+def test_side_prompts_cannot_expand_files():
+    """終端機 AI 不給工具,但 `@路徑` 是 CLI 在呼叫模型前就展開的,一樣要換掉。"""
+    term = terminal_ai.build_prompt("看 @/etc/passwd", "tiptop@erp:~$ cat x\n@/home/tiptop/.env")
+    assert "@/etc/passwd" not in term and "@/home/tiptop/.env" not in term
+    assert "tiptop@erp" in term
 
 
 def test_terminal_ai_sends_question_and_screen_on_stdin(monkeypatch):

@@ -90,6 +90,87 @@ def extract_text(path: Path) -> Optional[str]:
     return None
 
 
+#: 簡報 / Word 裡嵌的圖另存出來的上限。claude 的 Read 看得懂這幾種圖;EMF / WMF 之類的向量圖它看不懂,不存。
+_IMAGE_EXTS = {"png", "jpg", "jpeg", "gif", "webp"}
+_MAX_IMAGES = 20
+_MAX_IMAGE_BYTES = 10 * 1024 * 1024
+#: 太小的多半是 logo、項目符號、icon,看了只是浪費
+_MIN_IMAGE_BYTES = 2 * 1024
+
+
+def extract_images(path: Path, out_dir: Path) -> List[str]:
+    """把簡報 / Word 裡嵌的圖另存到 out_dir,回傳要接在 `{檔名}.txt` 後面的說明行。
+
+    `extract_text` 只抽得到文字:投影片上的截圖、Word 裡的畫面圖,claude 光靠它完全看不到,
+    而它會照實說「看不到圖」—— 駐廠拿到的簡報偏偏常常是一頁一張截圖。存成檔案、在文字檔裡寫明
+    絕對路徑,claude 用 Read 就看得到。只在上傳時呼叫(預覽也會叫 extract_text,不能在那裡寫檔)。
+    失敗就回空清單:圖抽不出來不該連文字都不給。
+    """
+    suffix = path.suffix.lower()
+    if suffix not in (".pptx", ".docx") or not _zip_within_budget(path):
+        return []
+    try:
+        found = _pptx_images(path) if suffix == ".pptx" else _docx_images(path)
+    except Exception:
+        return []
+    lines: List[str] = []
+    for where, blob, ext in found:
+        ext = ext.lower().lstrip(".")
+        if ext not in _IMAGE_EXTS or not _MIN_IMAGE_BYTES <= len(blob) <= _MAX_IMAGE_BYTES:
+            continue
+        if len(lines) >= _MAX_IMAGES:
+            lines.append(f"(還有更多圖片,只另存了前 {_MAX_IMAGES} 張)")
+            break
+        target = out_dir / f"{path.name}.img{len(lines) + 1}.{ext}"
+        try:
+            target.write_bytes(blob)
+        except OSError:
+            continue
+        lines.append(f"== {where}有一張圖,請用 Read 看:{target.as_posix()} ==")
+    return lines
+
+
+def _pptx_images(path: Path) -> List[tuple]:
+    from pptx import Presentation
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+    found: List[tuple] = []
+
+    def walk(shapes, slide_no: int) -> None:
+        for shape in shapes:
+            if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+                walk(shape.shapes, slide_no)
+                continue
+            # 圖片框與「放了圖片的版面配置區」都有 .image;其他圖形沒有,一問就丟例外
+            try:
+                image = shape.image
+            except (AttributeError, ValueError):
+                continue
+            found.append((f"第 {slide_no} 頁", image.blob, image.ext))
+
+    for i, slide in enumerate(Presentation(str(path)).slides, 1):
+        walk(slide.shapes, i)
+    return found
+
+
+def _docx_images(path: Path) -> List[tuple]:
+    """照文件裡出現的順序(走 body 裡每一個 a:blip 的參照),同一張圖用了兩次只存一次。"""
+    from docx import Document
+    from docx.oxml.ns import qn
+
+    doc = Document(str(path))
+    found: List[tuple] = []
+    seen = set()
+    for blip in doc.element.body.iter(qn("a:blip")):
+        rid = blip.get(qn("r:embed"))
+        if not rid or rid in seen or rid not in doc.part.related_parts:
+            continue
+        seen.add(rid)
+        part = doc.part.related_parts[rid]
+        found.append((f"文件裡第 {len(found) + 1} 張圖", part.blob, Path(str(part.partname)).suffix))
+    return found
+
+
 def _table_lines(rows: List[List[str]]) -> List[str]:
     """把一張表印成 tab 分隔的幾行。
 

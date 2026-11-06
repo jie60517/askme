@@ -111,7 +111,8 @@ def build_prompt(question: str, context: str) -> str:
     """
     clean_context = agent.sanitize_text(context, MAX_CONTEXT_CHARS * 2)[-MAX_CONTEXT_CHARS:]
     clean_question = agent.sanitize_text(question, MAX_QUESTION_CHARS)
-    return PREAMBLE.format(context=clean_context or "(沒有內容)", question=clean_question)
+    # 問題與畫面裡的 `@路徑` 會被 CLI 展開成檔案內容,沒有工具也擋不住(agent.inert_for_cli)
+    return agent.inert_for_cli(PREAMBLE.format(context=clean_context or "(沒有內容)", question=clean_question))
 
 
 def available() -> bool:

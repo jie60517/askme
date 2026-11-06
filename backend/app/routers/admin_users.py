@@ -1,15 +1,23 @@
-"""帳號管理。全部限管理員(require_admin),每個變更都寫稽核。
+"""帳號管理 + 角色(帳號管理頁的兩個分頁)。要有 Users 權限(管理員一律有),每個變更都寫稽核。
 
 帳號建立/刪除、權限變更一律走這裡,所以每個動作都留痕 —— 直接改資料庫
 的話沒有程式經手,記不到。
+
+⚠️ **Users 權限可以給角色**,所以這裡每一個會改東西的端點都過 `_guard`:
+不擋的話,有 Users 權限的人可以替自己全開,等於管理員。
 """
+
+import logging
 
 import anyio
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 
-from .. import audit, auth, config, mfa, ratelimit, schemas, terminal, users, workflow_engine
+from .. import audit, auth, config, mfa, ratelimit, roles, schemas, terminal, users, workflow_engine
 
 router = APIRouter(prefix="/api", tags=["admin-users"])
+logger = logging.getLogger(__name__)
+
+require_users = auth.require_perm("users")
 
 
 def _require_default_password() -> None:
@@ -33,7 +41,67 @@ def _apply(ok: bool, what: str) -> None:
         raise HTTPException(status_code=500, detail=f"{what}改不動,請再試一次")
 
 
-@router.get("/users", response_model=list[schemas.UserOut], dependencies=[Depends(auth.require_admin)])
+def _guard(actor: str, request: Request, target: str | None = None, *perms: dict) -> None:
+    """有 Users 權限的**一般帳號**不能替自己升權。管理員不受限。
+
+    ① 不能動**自己**的帳號(角色、權限、停用、密碼、手機驗證、刪除);
+    ② 只能給出**自己有的**權限 —— `perms` 裡每一份(改之前、改之後)都要被自己的權限包住;
+    ③ 所以也動不了權限比自己大的帳號與角色(連重設他的密碼、收回他的權限都不行 —— 前者等於接管他的帳號,
+       後者等於一個權限小的人能拔掉權限大的人);
+    ④ 碰不到管理員(他不在 users 表,這裡再擋一次名字)。
+    擋下來的每一次都記一筆稽核:有人在試權限邊界,事後要查得到。
+    """
+    if auth.is_admin(actor):
+        return
+    why = None
+    if target is not None and target.strip().lower() == config.ADMIN_USERNAME.lower():
+        why = "管理員的帳號只有管理員自己能動"
+    elif target is not None and target.strip().lower() == actor.strip().lower():
+        why = "不能改自己的帳號,請找管理員"
+    else:
+        mine = auth.perms_for(actor)
+        if any(not roles.covers(mine, p) for p in perms):
+            why = "這裡有你自己沒有的權限,只有管理員能改"
+    if why:
+        audit.record(
+            "users_action_denied",
+            actor=actor,
+            ip=ratelimit.client_ip(request),
+            detail=f"{request.method} {request.url.path}:{why}",
+        )
+        raise HTTPException(status_code=403, detail=why)
+
+
+def _target(username: str, actor: str, request: Request) -> dict:
+    """要動的帳號 {role, own, perms}:不存在 404,動不得(`_guard`)403。每一支會改帳號的端點都先走這裡。"""
+    current = roles.access_of(username)
+    if current is None:
+        raise HTTPException(status_code=404, detail="找不到這個帳號")
+    _guard(actor, request, username, current["perms"])
+    return current
+
+
+def _write(what: str, fn, *args, **kwargs):
+    """角色 / 權限的寫入(roles.py 用例外回報):說不成立的 → 400 帶原因;寫失敗 → 500「改不動」。
+
+    跟 `_apply` 同一個規則:**失敗就不往下走去寫稽核**。
+    """
+    try:
+        return fn(*args, **kwargs)
+    except roles.RoleError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001 —— 資料庫寫失敗:畫面要看到中文,不是英文的 Internal Server Error
+        logger.exception("%s寫入失敗", what)
+        raise HTTPException(status_code=500, detail=f"{what}改不動,請再試一次") from e
+
+
+def _user_row(username: str) -> dict:
+    return next(u for u in users.list_users() if u["username"] == username)
+
+
+@router.get("/users", response_model=list[schemas.UserOut], dependencies=[Depends(require_users)])
 def list_users():
     return users.list_users()
 
@@ -42,7 +110,7 @@ def list_users():
 def create_user(
     req: schemas.CreateUserRequest,
     request: Request,
-    admin: str = Depends(auth.require_admin),
+    admin: str = Depends(require_users),
 ):
     # 管理員與 Work Flow 對話的擁有者是保留名(users.is_reserved_name);不分大小寫,
     # 先在這裡擋,使用者看到的才是原因而不是 create_user 那一道的「建立失敗」
@@ -50,6 +118,8 @@ def create_user(
         raise HTTPException(status_code=400, detail=f"「{req.username}」是系統保留的帳號名,不能使用")
     if users.exists(req.username):
         raise HTTPException(status_code=409, detail="這個帳號已經存在")
+    # 新帳號一律是預設角色 —— 自己沒有那些權限的人也不能用「建帳號」變出一個有的人
+    _guard(admin, request, None, roles.role_perms(users.DEFAULT_ROLE))
     _require_default_password()
     if not users.create_user(req.username, req.display_name, created_by=admin):
         raise HTTPException(status_code=500, detail="建立失敗,請再試一次")
@@ -58,10 +128,10 @@ def create_user(
         "account_created",
         actor=admin,
         ip=ratelimit.client_ip(request),
-        # 新帳號一律是預設職稱 = 唯讀。要給完整權限是另一次操作、另一筆稽核。
-        detail=f"建立帳號 {req.username},職稱 {users.DEFAULT_ROLE}(唯讀)",
+        # 新帳號一律是預設角色。要給更多權限是另一次操作、另一筆稽核。
+        detail=f"建立帳號 {req.username},角色 {users.DEFAULT_ROLE}(權限:{roles.describe(roles.role_perms(users.DEFAULT_ROLE))})",
     )
-    return next(u for u in users.list_users() if u["username"] == req.username)
+    return _user_row(req.username.strip().lower())
 
 
 @router.patch("/users/{username}", response_model=schemas.UserOut)
@@ -69,33 +139,46 @@ def update_user(
     username: str,
     req: schemas.UpdateUserRequest,
     request: Request,
-    admin: str = Depends(auth.require_admin),
+    admin: str = Depends(require_users),
 ):
-    if not users.exists(username):
-        raise HTTPException(status_code=404, detail="找不到這個帳號")
-
+    current = _target(username, admin, request)
     ip = ratelimit.client_ip(request)
 
-    # 職稱。**用 model_fields_set 判斷有沒有帶** —— 帶空字串是「清掉」,
-    # 沒帶是「不動」,只看 `is not None` 的話這兩件事會變成同一件。
-    if "role" in req.model_fields_set:
-        # 直接把收乾淨的字串交給 set_role:空字串就是「清掉」(它存 NULL)。
-        new_role = users.normalize_role(req.role)
-        _apply(users.set_role(username, new_role), "職稱")
-        # ⚠️ 稽核一定要把**權限的後果**寫進去(職稱就是權限)。
-        # 權限沒有自己的稽核事件,事後查「誰給了他 Bash 權限」只能查到這一筆 ——
-        # 只記「職稱改為 Software engineer」的話,看不出那一刻他拿到了 Bash。
-        _grants_full = users.role_grants_full(new_role)
-        audit.record(
-            "role_changed",
-            actor=admin,
-            ip=ip,
-            detail=(
-                f"{username} 職稱改為 {new_role}(權限:{'完整' if _grants_full else '唯讀'})"
-                if new_role
-                else f"清掉 {username} 的職稱(權限:唯讀)"
-            ),
-        )
+    # 角色與權限。收成「改之後的角色 + 完整權限」再一次寫:
+    # perms = 畫面上那份完整清單;沒帶 perms 只換角色 = 個人加減照留
+    if req.role is not None or req.perms is not None:
+        role_id = req.role if req.role is not None else current["role"]
+        role = roles.get_role(role_id)
+        if role is None:
+            raise HTTPException(status_code=400, detail="找不到這個角色")
+        base = role["perms"]
+        if req.perms is not None:
+            target = req.perms.model_dump()
+        elif req.role is not None:
+            target = roles.apply(base, current["own"])
+        else:
+            target = dict(current["perms"])
+        after = roles.apply(base, roles.diff(base, target))
+        _guard(admin, request, username, after)
+
+        if role_id != current["role"] or after != current["perms"]:
+            _write("權限", roles.set_user_access, username, role_id, target)
+            # ⚠️ 稽核一定要把**權限的後果**寫進去:只記「角色改為 主管」的話,
+            # 事後查「誰給了他 Bash」會對不上任何一筆 —— 而那件事確實發生了,就在這裡。
+            if role_id != current["role"]:
+                audit.record(
+                    "role_changed",
+                    actor=admin,
+                    ip=ip,
+                    detail=f"{username} 角色改為 {role['name']}(權限:{roles.describe(after)})",
+                )
+            if after != current["perms"]:
+                audit.record(
+                    "perms_changed",
+                    actor=admin,
+                    ip=ip,
+                    detail=f"{username} 權限:{roles.describe_changes(current['perms'], after)}",
+                )
 
     # 停用 / 啟用
     if req.disabled is not None:
@@ -110,13 +193,13 @@ def update_user(
         if req.disabled:
             auth.revoke_all_for(username)
 
-    return next(u for u in users.list_users() if u["username"] == username)
+    return _user_row(username)
 
 
 @router.post("/users/{username}/reset-password", status_code=204)
-def reset_password(username: str, request: Request, admin: str = Depends(auth.require_admin)):
-    if not users.exists(username):
-        raise HTTPException(status_code=404, detail="找不到這個帳號")
+def reset_password(username: str, request: Request, admin: str = Depends(require_users)):
+    # 重設別人的密碼 = 拿得到他的帳號:權限比自己大的人不能動(`_guard` ③)
+    _target(username, admin, request)
     _require_default_password()
     if not users.reset_password(username):
         raise HTTPException(status_code=500, detail="重設失敗,請再試一次")
@@ -141,6 +224,8 @@ def admin_account():
 
     網址用 `/admin-account` 而不是 `/users/admin`:後者會被
     `/users/{username}` 吃掉,變成「查一個叫 admin 的帳號」。
+
+    ⚠️ 只有管理員本人打得到(`_guard` ④):有 Users 權限的一般帳號看不到這一塊。
     """
     return schemas.AdminAccountOut(
         username=config.ADMIN_USERNAME,
@@ -153,7 +238,7 @@ def admin_account():
 def issue_mfa(
     username: str,
     request: Request,
-    admin: str = Depends(auth.require_admin),
+    admin: str = Depends(require_users),
     authorization: str = Header(default=""),
 ):
     """配一組新的手機驗證碼給這個帳號,回傳畫 QR 需要的東西。
@@ -164,9 +249,18 @@ def issue_mfa(
     ⚠️ **重新產生會把舊的立刻停用。** 使用者還沒掃新的 QR 之前就登不進來了,
     所以畫面上一定要講清楚,而且最好當面掃完再走。
 
-    ⚠️ 帳號存不存在**故意不檢查**:管理員本人不在 `users` 表裡,而他也需要
-    被發一組(`MFA_REQUIRED` 開著時他自己也會被擋)。
+    管理員本人不在 `users` 表裡,而他也需要被發一組(`MFA_REQUIRED` 開著時他自己也會被擋),
+    所以帳號不存在時只放行管理員的名字;發給管理員只有管理員自己能按(`_guard` ④)。
+
+    ⚠️ 名字一定要先正規化成資料庫裡那個寫法再檢查。`mfa.issue` 不分大小寫、會去掉前後空白,
+    拿原樣的名字檢查的話,`BOSS` 查不到人、權限比對整段跳過,寫進去的卻是 `boss` 的密鑰。
     """
+    username = auth.canonical_username(username)
+    current = roles.access_of(username)
+    if current is None and not auth.is_admin(username):
+        raise HTTPException(status_code=404, detail="找不到這個帳號")
+    # 發手機驗證碼 = 拿得到他的第二關:權限比自己大的人不能動(`_guard` ③)
+    _guard(admin, request, username, *([current["perms"]] if current is not None else []))
     result = mfa.issue(username)
     # 舊的登入一起踢掉:重新產生的情境多半是「手機不見了」,而那支手機上
     # 可能還開著一個已登入的分頁。
@@ -185,9 +279,8 @@ def issue_mfa(
 
 
 @router.delete("/users/{username}", status_code=204)
-def delete_user(username: str, request: Request, admin: str = Depends(auth.require_admin)):
-    if not users.exists(username):
-        raise HTTPException(status_code=404, detail="找不到這個帳號")
+def delete_user(username: str, request: Request, admin: str = Depends(require_users)):
+    _target(username, admin, request)
     archived = users.delete_user(username)
     if not archived:
         raise HTTPException(status_code=500, detail="刪除失敗,請再試一次")
@@ -204,3 +297,75 @@ def delete_user(username: str, request: Request, admin: str = Depends(auth.requi
     audit.record(
         "account_deleted", actor=admin, ip=ratelimit.client_ip(request), detail=f"刪除帳號 {username}"
     )
+
+
+# ------------------------------------------------------------------ 角色(帳號管理頁的「角色」分頁)
+
+
+@router.get("/roles", response_model=list[schemas.RoleOut], dependencies=[Depends(require_users)])
+def list_roles():
+    return roles.list_roles()
+
+
+@router.post("/roles", response_model=schemas.RoleOut, status_code=201)
+def create_role(req: schemas.CreateRoleRequest, request: Request, admin: str = Depends(require_users)):
+    perms = roles.clean_perms(req.perms.model_dump())
+    _guard(admin, request, None, perms)
+    role = _write("角色", roles.create_role, req.name, perms, created_by=admin)
+    audit.record(
+        "role_created",
+        actor=admin,
+        ip=ratelimit.client_ip(request),
+        detail=f"建立角色 {role['name']}(權限:{roles.describe(role['perms'])})",
+    )
+    return role
+
+
+@router.patch("/roles/{role_id}", response_model=schemas.RoleOut)
+def update_role(role_id: str, req: schemas.UpdateRoleRequest, request: Request, admin: str = Depends(require_users)):
+    role = roles.get_role(role_id)
+    if role is None:
+        raise HTTPException(status_code=404, detail="找不到這個角色")
+    perms = roles.clean_perms(req.perms.model_dump()) if req.perms is not None else None
+    # 改之前、改之後都要被自己的權限包住(`_guard` ②③):不然可以把自己那個角色的權限加大
+    _guard(admin, request, None, role["perms"], *([perms] if perms is not None else []))
+    before = _write("角色", roles.update_role, role_id, name=req.name, perms=perms)
+    after = roles.get_role(role_id)
+    ip = ratelimit.client_ip(request)
+    if after["name"] != before["name"]:
+        audit.record("role_renamed", actor=admin, ip=ip, detail=f"角色 {before['name']} 改名為 {after['name']}")
+    if after["perms"] != before["perms"]:
+        # 一個角色可能掛著很多人:稽核要寫明影響幾個人
+        audit.record(
+            "role_perms_changed",
+            actor=admin,
+            ip=ip,
+            detail=(
+                f"角色 {after['name']} 權限:{roles.describe_changes(before['perms'], after['perms'])}"
+                f"(影響 {after['member_count']} 人)"
+            ),
+        )
+    return after
+
+
+@router.post("/roles/delete", status_code=204)
+def delete_roles(req: schemas.DeleteRolesRequest, request: Request, admin: str = Depends(require_users)):
+    """刪一個或好幾個角色(左邊勾選後的「刪除 N 個角色」)。**一個刪不掉就全部不刪**,錯誤一次講完。
+
+    擋的規則與「同一個交易」在 roles.delete_roles(預設角色、有人用、Work Flow 用到 All <角色>)。
+    """
+    for rid in dict.fromkeys(req.ids):
+        role = roles.get_role(rid)
+        if role is None:
+            raise HTTPException(status_code=404, detail="找不到這個角色")
+        _guard(admin, request, None, role["perms"])
+    try:
+        names = roles.delete_roles(req.ids)
+    except roles.RoleError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except Exception as e:  # noqa: BLE001 —— 資料庫寫失敗(整筆已經回滾)
+        logger.exception("刪角色寫入失敗")
+        raise HTTPException(status_code=500, detail="角色刪不掉,請再試一次") from e
+    ip = ratelimit.client_ip(request)
+    for name in names:
+        audit.record("role_deleted", actor=admin, ip=ip, detail=f"刪除角色 {name}")

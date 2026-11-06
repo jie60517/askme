@@ -1,25 +1,32 @@
+import asyncio
+import json
 import uuid
 from datetime import datetime
-from typing import List
+from typing import Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket
 
 # ⚠️ 要用 starlette 的 UploadFile 來判斷,不能用 fastapi 的:手動 `request.form()`
 # 拿到的是 starlette 的實例,而 fastapi.UploadFile 是它的**子類別** ——
 # isinstance(starlette 實例, fastapi.UploadFile) 永遠是 False,
 # 附件會被靜靜濾光,存進去的便條一個檔案都沒有。
 from starlette.datastructures import UploadFile
+from starlette.websockets import WebSocketDisconnect
 from sqlalchemy.orm import Session
 
-from .. import auth, ids, models, notes, schemas, shares, uploads, users
-from ..database import get_db
+from .. import auth, ids, live, models, notes, schemas, shares, terminal, uploads, users
+from ..database import SessionLocal, get_db
 
 router = APIRouter(prefix="/api", tags=["notes"])
 
 _CONV_ID = ids.path_param()
 
 
-def _to_out(note: models.ConversationNote, display: dict) -> schemas.NoteOut:
+def _to_out(
+    note: models.ConversationNote,
+    display: dict,
+    seen: Optional[Dict[str, datetime]] = None,
+) -> schemas.NoteOut:
     mentioned = [n for n in (note.mentioned or "").split(",") if n]
     return schemas.NoteOut(
         id=note.id,
@@ -30,6 +37,7 @@ def _to_out(note: models.ConversationNote, display: dict) -> schemas.NoteOut:
         body=note.body,
         mentioned=mentioned,
         mentioned_names={u: display.get(u, u) for u in mentioned},
+        seen=seen or {},
         attachments=[n for n in (note.attachments or "").split(",") if n],
         attachment_sid=note.attachment_sid,
     )
@@ -48,7 +56,8 @@ def list_notes(
     # 帳號清單撈一次就好 —— display_names() 的 docstring 明寫「避免在迴圈裡逐筆查」,
     # 放進 list comprehension 會變成每則便條重讀一次整份 users 表。
     display = users.display_names()
-    return [_to_out(n, display) for n in notes.notes_for(db, conversation_id)]
+    seen = notes.seen_by_note(db, conversation_id)
+    return [_to_out(n, display, seen.get(n.id)) for n in notes.notes_for(db, conversation_id)]
 
 
 @router.post(
@@ -108,7 +117,8 @@ async def create_note(
     if owner != viewer and not shares.can_access(db, conversation_id, viewer):
         raise HTTPException(status_code=404, detail="找不到這個對話")
 
-    note, _ = notes.create_note(db, conversation_id, viewer, text)
+    # 先不推:附件還沒存,存完底下才推(見 notes.create_note 的 announce)
+    note, _ = notes.create_note(db, conversation_id, viewer, text, announce=False)
     if not note.mentioned:
         # 一個人都沒 @ 到,那這則沒有收件人。**要講出來**,不然使用者會以為
         # 已經通知出去了(最常見的原因是帳號打錯字,而畫面上看起來一模一樣)。
@@ -135,6 +145,8 @@ async def create_note(
         # 收得到那張截圖,而它根本沒存進去(同 uploads.py)。
         rejected_msgs = [f"「{name}」沒有附上:{reason}" for name, reason in rejected]
 
+    # 附件也存好了才推:開著這組對話的人重抓時,這則便條的附件要已經在上面
+    live.publish(conversation_id)
     out = _to_out(note, users.display_names())
     out.rejected_files = rejected_msgs
     return out
@@ -230,4 +242,105 @@ def mark_conversation_read(
     """
     marked = notes.mark_read(db, viewer, conversation_id)
     db.commit()
+    if marked:
+        # 寫便條的人(跟其他開著這組對話的人)要在一秒內看到他的頭像。commit 之後才推,見 live.publish
+        live.publish(conversation_id)
     return schemas.UnreadOut(unread=notes.unread_count(db, viewer), marked=marked)
+
+
+#: 沒事的時候多久送一則 ping。這條線大部分時間是安靜的,而 nginx 的 proxy_read_timeout
+#: 預設 60 秒 —— 一分鐘沒東西經過,代理就把它當死掉的連線切掉,前端只會一直重連。
+LIVE_PING_SEC = 25.0
+#: 看不到這組對話(或對話不存在)。前端收到就不重連 —— 重連也只會再被關一次。
+CLOSE_NOT_FOUND = 4404
+
+
+def _can_access_sync(conversation_id: str, viewer: str) -> bool:
+    db = SessionLocal()
+    try:
+        return shares.can_access(db, conversation_id, viewer)
+    finally:
+        db.close()
+
+
+async def _can_access(conversation_id: str, viewer: str) -> bool:
+    """丟到執行緒跑:每條推送線每 30 秒問一次,同步查資料庫會卡住整個 event loop
+    (正式站是 PostgreSQL,一次查詢就是一趟網路來回)。"""
+    return await asyncio.to_thread(_can_access_sync, conversation_id, viewer)
+
+
+@router.websocket("/conversations/{conversation_id}/live")
+async def notes_live(ws: WebSocket, conversation_id: str) -> None:
+    """開著對話頁就連著這條:便條或已讀變了,伺服器推一則 `{"type": "notes"}`,前端重抓便條。
+
+    驗身分跟 SSH 終端機同一套(瀏覽器開 WebSocket 帶不了 Authorization 標頭):同源 +
+    第一則訊息 `{"type": "auth", "token": …}`。連上先送 `{"type": "ready"}` ——
+    前端在 ready 時重抓一次,斷線那段時間錯過的推送就補回來了。
+
+    ⚠️ 身分與權限每 `TOKEN_CHECK_SEC` 秒回頭確認一次:登出、被移出共用,這條線要跟著關,
+    不能一直推「誰看過了」給已經看不到這組對話的人。問 `auth.username_for` 也算一次活動 ——
+    跟 SSH 終端機同一個理由(連線還活著就證明瀏覽器沒關,見它的說明);側邊欄本來就每 8 秒
+    打一次 API,所以多了這條線,也不會讓任何人更晚被閒置登出。
+    """
+    await ws.accept()
+
+    async def reject(code: int, message: str) -> None:
+        try:
+            await ws.close(code=code, reason=message[:120])
+        except Exception:  # noqa: BLE001 —— 瀏覽器先走了
+            pass
+
+    if not terminal.origin_ok(ws.headers.get("origin"), ws.headers.get("host")):
+        await reject(terminal.CLOSE_FORBIDDEN, "來源不符")
+        return
+    try:
+        msg = json.loads(await asyncio.wait_for(ws.receive_text(), terminal.AUTH_TIMEOUT_SEC))
+        token = str(msg.get("token") or "").strip() if isinstance(msg, dict) else ""
+        viewer = auth.require_user(f"Bearer {token}")
+    except (asyncio.TimeoutError, WebSocketDisconnect, ValueError, RuntimeError, HTTPException):
+        await reject(terminal.CLOSE_UNAUTHENTICATED, "沒有登入,或登入已過期")
+        return
+    if not ids.REGEX.match(conversation_id) or not await _can_access(conversation_id, viewer):
+        await reject(CLOSE_NOT_FOUND, "找不到這個對話")
+        return
+
+    queue = live.subscribe(conversation_id)
+
+    async def pump_out() -> None:
+        await ws.send_text(json.dumps({"type": "ready"}))
+        while True:
+            try:
+                event = await asyncio.wait_for(queue.get(), LIVE_PING_SEC)
+            except asyncio.TimeoutError:
+                await ws.send_text(json.dumps({"type": "ping"}))
+                continue
+            await ws.send_text(json.dumps({"type": event}))
+
+    async def pump_in() -> None:
+        # 前端不送任何東西;只等它斷線
+        while True:
+            frame = await ws.receive()
+            if frame.get("type") == "websocket.disconnect":
+                return
+
+    async def access_watch() -> int:
+        while True:
+            await asyncio.sleep(terminal.TOKEN_CHECK_SEC)
+            if auth.username_for(token) is None:
+                return terminal.CLOSE_UNAUTHENTICATED
+            if not await _can_access(conversation_id, viewer):
+                return CLOSE_NOT_FOUND
+
+    watch = asyncio.create_task(access_watch())
+    tasks = {asyncio.create_task(pump_out()), asyncio.create_task(pump_in()), watch}
+    try:
+        await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        for t in tasks:
+            t.cancel()
+        live.unsubscribe(conversation_id, queue)
+        code = watch.result() if watch.done() and not watch.cancelled() and watch.exception() is None else 1000
+        try:
+            await ws.close(code=code)
+        except Exception:  # noqa: BLE001 —— 瀏覽器先走了
+            pass

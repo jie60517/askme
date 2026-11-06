@@ -303,11 +303,12 @@ export function wouldCycle(folders: Folder[], folderId: number, targetId: number
 export type ShareablePerson = {
   username: string;
   display_name: string;
-  /**
-   * 畫面上的職稱。**它同時決定權限**(Consultant = 唯讀、
-   * Software engineer = 完整),見 `adminApi.roleGrantsFull`。
-   */
+  /** 畫面上的職稱(角色名;管理員是 `Admin`)。權限由角色決定,這裡只拿來顯示與分組 */
   role: string;
+  /** 角色的 id(管理員是空字串 —— 他不是角色)。@ 選單的「All <角色>」照它分組。舊後端沒有這一欄 */
+  role_id?: string;
+  /** 角色在角色表的第幾個(管理員 -1)。@ 選單的群組照它排。舊後端沒有這一欄 */
+  role_rank?: number;
   /**
    * 他的頭像(data URI)。null = 沒設過,畫面上顯示名字縮寫。
    * 共用對話裡其他成員的頭像就是從這裡來的。

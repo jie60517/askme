@@ -204,6 +204,33 @@ def test_challenge_is_single_use(account):
         assert again.status_code == 401
 
 
+def test_disabled_account_cannot_redeem_a_challenge_taken_before(account):
+    """停用前先過密碼拿一張中間憑證,停用後再拿驗證碼去換 —— 不能換到 12 小時的 token。"""
+    secret = mfa.issue(account)["secret"]
+
+    with TestClient(app) as client:
+        challenge = client.post(
+            "/api/login", json={"username": account, "password": PASSWORD}
+        ).json()["mfa_token"]
+        users.set_disabled(account, True)
+        resp = client.post(
+            "/api/login/mfa", json={"mfa_token": challenge, "code": _code_now(secret)}
+        )
+        assert resp.status_code == 401
+
+
+def test_revoking_logins_also_drops_pending_challenges(account):
+    """停用、重設密碼都走 revoke_all_for:還沒換成 token 的中間憑證也要一起作廢。"""
+    mfa.issue(account)
+    with TestClient(app) as client:
+        challenge = client.post(
+            "/api/login", json={"username": account, "password": PASSWORD}
+        ).json()["mfa_token"]
+    assert auth.challenge_user(challenge) == account
+    auth.revoke_all_for(account)
+    assert auth.challenge_user(challenge) is None
+
+
 def test_unbound_user_logs_in_with_password_until_enforced(account, monkeypatch):
     """還沒發到 QR 的人:**沒開強制時照舊登得進來,開了就擋。**
 

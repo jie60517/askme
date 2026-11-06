@@ -563,7 +563,8 @@ function QuestionsTable({
       key: 'act',
       header: '',
       // 精簡版換成只有箭頭的小鈕(仍有 label 給報讀與鍵盤;不加 tooltip)
-      width: pixel(isCompact ? 44 : 88),
+      // 104 = 字 56 + 鈕內距 12×2 + 格內距 12×2(Astryx 0.7 小鈕內距是 12,88 會把字截成「看每...」)
+      width: pixel(isCompact ? 44 : 104),
       renderCell: (it) =>
         isCompact ? (
           <IconButton

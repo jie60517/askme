@@ -54,7 +54,9 @@ git log —— 留在檔案裡只會讓讀的人分不清哪一句是現在的�
   |---|---|
   | 圖片 | `<img>` 直接放 |
   | PDF | `<iframe>` 交給瀏覽器內建檢視器。**不能帶 `sandbox`** —— Chrome 不在沙箱裡開 PDF;安全靠後端的 inline 白名單與 nosniff |
-  | Word / Excel / PowerPoint | 後端 `GET /api/preview/{files\|uploads}/{sid}/{檔名}` 用 `extract_text` 抽成純文字(**跟上傳時餵給 claude 的是同一份實作**,不要另外寫一份平行的解析);抽不出來回 415 |
+  | Word / PowerPoint | `?as=pdf`:後端叫 LibreOffice 轉成 PDF(`officepreview.py`,結果快取在 `PREVIEW_CACHE_DIR`,7 天沒人看就清),用 PDF 那條路顯示。找不到 LibreOffice(`SOFFICE_PATH`、PATH、Windows 預設安裝位置都沒有)回 503,前端退回純文字 |
+  | Excel | `?as=sheet`:後端讀成每張工作表的值(列數 / 欄數有上限,超過會標出來),前端畫成表格 |
+  | 轉不了時的退路 | 不帶 `as` 的 `GET /api/preview/{files\|uploads}/{sid}/{檔名}` 用 `extract_text` 抽成純文字(**跟上傳時餵給 claude 的是同一份實作**,不要另外寫一份平行的解析);抽不出來回 415 |
   | 其餘(程式碼、txt、md、html…) | fetch 原檔,以 `<pre>{文字}</pre>` 渲染(React 會轉義,不會被當成 HTML 執行),太長會截斷 |
 
   壓縮檔、執行檔、影音只能下載。`lib/filekind.ts` 用**排除法**判斷(不是圖片、也不在二進位副檔名

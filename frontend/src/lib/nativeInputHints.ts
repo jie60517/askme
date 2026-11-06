@@ -1,19 +1,16 @@
 /**
  * 手機鍵盤的提示屬性 —— 登入頁、SSH 登入方框、檔案欄的路徑欄共用。
  *
- * ⚠️ 這幾個屬性 Astryx 的 `TextInput` **只在型別上**拿掉了(`BaseProps` 把
- * `inputMode` / `autoCapitalize` / `autoCorrect` / `spellCheck` / `enterKeyHint`
- * 列在 Omit 裡,`autoComplete` 則根本不在 `HTMLAttributes` 上);執行期它會把
- * `...rest` 原樣攤到裡面那個 `<input>`(`TextInput.js` 的 `_jsx("input", {...rest, ...})`)。
- * 所以用一個有型別的物件**展開**進去(`{...NO_AUTOFIX}`)—— JSX 的展開不做多餘屬性檢查,
- * 而型別仍然擋得住拼錯的屬性名。設計系統升版後如果不再攤 `rest`,
- * `components/__tests__/TextInputNativeHints.test.tsx` 會先紅。
+ * Astryx 0.7 起 `TextInput` 自己有這幾個屬性(`enterKeyHint`、`inputMode`、`autoCapitalize`、
+ * `hasAutoCorrect`、`hasSpellCheck`、`autoComplete`),這裡直接用正式屬性,
+ * 不靠展開塞進 `<input>`。
+ * `components/__tests__/TextInputNativeHints.test.tsx` 驗它們真的落在 `<input>` 上。
  */
-import type {InputHTMLAttributes} from 'react';
+import type {TextInputProps} from '@astryxdesign/core/TextInput';
 
 export type NativeInputHints = Pick<
-  InputHTMLAttributes<HTMLInputElement>,
-  'inputMode' | 'autoComplete' | 'autoCapitalize' | 'autoCorrect' | 'spellCheck' | 'enterKeyHint'
+  TextInputProps,
+  'inputMode' | 'autoComplete' | 'autoCapitalize' | 'hasAutoCorrect' | 'hasSpellCheck' | 'enterKeyHint'
 >;
 
 /**
@@ -23,6 +20,6 @@ export type NativeInputHints = Pick<
  */
 export const NO_AUTOFIX = {
   autoCapitalize: 'none',
-  autoCorrect: 'off',
-  spellCheck: false,
+  hasAutoCorrect: false,
+  hasSpellCheck: false,
 } as const satisfies NativeInputHints;

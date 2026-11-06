@@ -26,9 +26,10 @@ def _require_available() -> None:
 router = APIRouter(prefix="/api/workflows", tags=["workflows"], dependencies=[Depends(_require_available)])
 
 
-def require_engineer(viewer: str = Depends(auth.require_user)) -> str:
-    if not auth.can_use_terminal(viewer):
-        raise HTTPException(status_code=403, detail="這個功能只開放給工程師")
+def require_workflow(viewer: str = Depends(auth.require_user)) -> str:
+    # 有 Work Flow 就一定有 SSH Server(roles 保證)—— 流程會在主機上跑指令
+    if not auth.can_workflow(viewer):
+        raise HTTPException(status_code=403, detail="你沒有 Work Flow 的權限")
     return viewer
 
 
@@ -70,12 +71,12 @@ def _normalize(body: WorkflowIn) -> tuple[str, dict, dict]:
 
 
 @router.get("/catalog")
-def get_catalog(viewer: str = Depends(require_engineer)):
+def get_catalog(viewer: str = Depends(require_workflow)):
     return workflows.catalog()
 
 
 @router.get("")
-def list_workflows(viewer: str = Depends(require_engineer)):
+def list_workflows(viewer: str = Depends(require_workflow)):
     with session_scope() as db:
         rows = (
             db.query(models.Workflow)
@@ -106,7 +107,7 @@ def list_workflows(viewer: str = Depends(require_engineer)):
 
 
 @router.post("")
-def create_workflow(body: WorkflowIn = Body(default_factory=WorkflowIn), viewer: str = Depends(require_engineer)):
+def create_workflow(body: WorkflowIn = Body(default_factory=WorkflowIn), viewer: str = Depends(require_workflow)):
     name, graph, schedule = _normalize(body)
     schedule = workflows.schedule_owner(schedule, None, viewer)
     now = datetime.utcnow()
@@ -127,7 +128,7 @@ def get_run(
     run_id: int,
     since: int = Query(default=0, ge=0),
     lines: bool = Query(default=False),
-    viewer: str = Depends(require_engineer),
+    viewer: str = Depends(require_workflow),
 ):
     state = engine.get_state(run_id)
     if state is not None:
@@ -142,7 +143,7 @@ def get_run(
 
 
 @router.post("/runs/{run_id}/stop")
-def stop_run(run_id: int, viewer: str = Depends(require_engineer)):
+def stop_run(run_id: int, viewer: str = Depends(require_workflow)):
     state = engine.get_state(run_id)
     if state is None or state.status != "running":
         raise HTTPException(status_code=409, detail="這次執行已經結束了")
@@ -152,13 +153,13 @@ def stop_run(run_id: int, viewer: str = Depends(require_engineer)):
 
 
 @router.get("/{workflow_id}")
-def get_workflow(workflow_id: int, viewer: str = Depends(require_engineer)):
+def get_workflow(workflow_id: int, viewer: str = Depends(require_workflow)):
     with session_scope() as db:
         return _detail(_get(db, workflow_id))
 
 
 @router.put("/{workflow_id}")
-def save_workflow(workflow_id: int, body: WorkflowIn, viewer: str = Depends(require_engineer)):
+def save_workflow(workflow_id: int, body: WorkflowIn, viewer: str = Depends(require_workflow)):
     name, graph, schedule = _normalize(body)
     with session_scope() as db:
         row = _get(db, workflow_id)
@@ -185,7 +186,7 @@ class ScheduleSwitch(BaseModel):
 
 
 @router.patch("/{workflow_id}/schedule")
-def switch_schedule(workflow_id: int, body: ScheduleSwitch, viewer: str = Depends(require_engineer)):
+def switch_schedule(workflow_id: int, body: ScheduleSwitch, viewer: str = Depends(require_workflow)):
     """清單頁那顆排程開關:只動 `on`,其他排程內容不變。
 
     會更新 `updated_at` —— 有人開著編輯器的話,他存檔時會收到 409,不會把開關默默蓋回去。
@@ -208,7 +209,7 @@ def switch_schedule(workflow_id: int, body: ScheduleSwitch, viewer: str = Depend
 
 
 @router.delete("/{workflow_id}")
-def delete_workflow(workflow_id: int, viewer: str = Depends(require_engineer)):
+def delete_workflow(workflow_id: int, viewer: str = Depends(require_workflow)):
     with session_scope() as db:
         row = _get(db, workflow_id)
         if engine.live_for(row.id):
@@ -221,7 +222,7 @@ def delete_workflow(workflow_id: int, viewer: str = Depends(require_engineer)):
 
 
 @router.post("/{workflow_id}/run")
-async def run_workflow(workflow_id: int, viewer: str = Depends(require_engineer)):
+async def run_workflow(workflow_id: int, viewer: str = Depends(require_workflow)):
     with session_scope() as db:
         row = _get(db, workflow_id)
         problems = workflows.run_problems(json.loads(row.graph or "{}"))
@@ -235,7 +236,7 @@ async def run_workflow(workflow_id: int, viewer: str = Depends(require_engineer)
 
 
 @router.get("/{workflow_id}/runs")
-def list_runs(workflow_id: int, limit: int = Query(default=50, ge=1, le=200), viewer: str = Depends(require_engineer)):
+def list_runs(workflow_id: int, limit: int = Query(default=50, ge=1, le=200), viewer: str = Depends(require_workflow)):
     with session_scope() as db:
         _get(db, workflow_id)
         rows = (

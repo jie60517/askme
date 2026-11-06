@@ -175,6 +175,45 @@ a,
 }
 
 /*
+ * 巢狀列的縮排(Astryx 0.7.8)。
+ *
+ * 0.7 起 SideNavItem 的巢狀縮排畫在**每一列自己的** `padding-inline-start` 上
+ * (深度 × --spacing-6,值放在列上的 inline 變數 `--x-paddingInlineStart`,優先層 priority4),
+ * 列的基本內距是 `padding-inline: --spacing-2`(priority3)。但我們自己的程式碼也用到同一個
+ * `padding-inline: --spacing-2` 的原子 class,建置外掛會把它在 `product` 層再印一次 ——
+ * product 層排在 astryx-base 之後,於是 priority3 的簡寫蓋過了 priority4 的縮排,
+ * 資料夾 / Personal / Shared 底下的對話列、筆記樹的子頁全部貼回左邊(dev 與正式 build 都一樣)。
+ * 這裡只把「有縮排值的列」的縮排補回去,值完全照設計系統算的那個。
+ * 第二條是「本身有連結又能展開」的列(筆記樹裡有子頁的頁):外層那格才是 `.astryx-side-nav-item`,
+ * 縮排畫在裡面那個 `<a>` 上(設計系統的 primaryIndent),而那個 `<a>` 的 `padding: 0` 一樣被 product 層蓋過。
+ * ⚠️ 認的是 StyleX 動態樣式的變數名(不是公開介面,刻意的例外);
+ * `components/__tests__/sideNavIndentHook.test.tsx` 在升版改名時會先紅。
+ */
+.astryx-side-nav-item[style*='--x-paddingInlineStart'],
+.astryx-side-nav-item > [style*='--x-paddingInlineStart'] {
+  padding-inline-start: var(--x-paddingInlineStart);
+}
+
+/*
+ * 局部的 `<Theme mode>`(Settings 的深淺色預覽小卡)在**正式 build** 裡不會換色。
+ *
+ * 正式 build 的 Lightning CSS 把 `light-dark(a, b)` 降級成 `var(--lightningcss-light, a) var(--lightningcss-dark, b)`,
+ * 而那兩個開關只寫在 `html[data-theme=…]` 上(設計系統的 reset.css / 佈景)。局部 Theme 的外層有
+ * `data-astryx-theme` + `data-theme`,佈景也在它身上重新宣告整組 token —— 只差開關沒跟著設,
+ * 於是 token 照 `<html>` 那一邊算:深色那張卡在淺色模式裡畫成淺的(dev 用原生 light-dark,看不出來)。
+ * 這裡把開關補到局部 Theme 上。值照 Lightning CSS 自己產生的那兩組(build 裡 `html[data-theme=dark]` 那條)。
+ * 依賴的是建置工具的變數名(刻意的例外);`styles/__tests__/localThemeSwitch.test.ts` 改名時會先紅。
+ */
+[data-astryx-theme][data-theme='dark'] {
+  --lightningcss-light: ;
+  --lightningcss-dark: initial;
+}
+[data-astryx-theme][data-theme='light'] {
+  --lightningcss-light: initial;
+  --lightningcss-dark: ;
+}
+
+/*
  * 捲軸(側邊欄 + 選單/清單)。
  *
  * 三件事:
@@ -240,6 +279,18 @@ a,
 [data-thin-scrollbar] {
   scrollbar-width: thin;
   scrollbar-color: var(--color-text-primary) transparent;
+}
+
+/*
+ * Excel 預覽(OfficePreview 的 SheetPreview):`Table` 會照外層卡片的內距往外撐(containerBleed,為了在卡片裡貼齊邊緣),
+ * 右側面板的捲動層會把撐出去那段切掉 —— 第一欄左邊少一個字、表頭被分頁列蓋住 12px。
+ * 這裡把那幾個變數歸零,表格就待在預覽那一層裡面。放這裡不放 xstyle:xstyle 不收 --* 自訂屬性。
+ */
+[data-sheet-preview] {
+  --container-padding-inline-start: 0px;
+  --container-padding-inline-end: 0px;
+  --container-padding-block-start: 0px;
+  --container-padding-block-end: 0px;
 }
 /*
  * 浮層裡的可捲區**捲到底不外溢**(症狀:在右鍵選單的圖示格子裡
@@ -2489,6 +2540,17 @@ html.vt-theme::view-transition-old(root),
 html.vt-theme::view-transition-new(root) {
   animation-duration: var(--duration-medium-min);
   animation-timing-function: var(--ease-standard);
+}
+
+/*
+ * 換佈景那一段整頁只拍一張(在設定裡切換深淺模式時,對話的輸入框會單獨跳出來)。
+ * 問答頁的輸入框一直掛著 `view-transition-name: composer`(New chat ↔ 對話那段過場要用),
+ * 有名字的元素會被拍成獨立一層、畫在所有東西上面 —— 連設定對話框(top layer)都蓋過去。
+ * `vt-theme` 在拍舊畫面之前就掛上(`applyWithFade`),所以新舊兩張都不會有具名的那幾層。
+ * `!important` 是為了壓過元件上的 inline style(SSH 那幾個 `host-card` / `host-logo`)。
+ */
+html.vt-theme * {
+  view-transition-name: none !important;
 }
 
 /*

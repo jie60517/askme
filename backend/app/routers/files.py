@@ -1,11 +1,11 @@
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from sqlalchemy.orm import Session
 
-from .. import auth, config, models, shares
+from .. import auth, config, models, officepreview, shares
 from ..database import get_db
 from ..extract import extract_text
 
@@ -189,10 +189,21 @@ def preview_as_text(
     scope: str,
     session_id: str,
     filename: str,
+    as_: str = Query("text", alias="as"),
     viewer: str = Depends(auth.require_user_file),
     db: Session = Depends(get_db),
 ):
-    """Word / Excel / PowerPoint 的**純文字**預覽。
+    """Word / Excel / PowerPoint 的預覽。`?as=` 決定給什麼:
+
+    - `text`(預設):**純文字**,下面那一大段講的就是它。
+    - `pdf`:Word / 簡報轉成的 PDF(`officepreview.to_pdf`),前端放進 PDF 框。
+    - `sheet`:Excel 每張工作表的值(`officepreview.sheets`),前端畫表格。
+
+    `pdf` / `sheet` 轉不了時:主機沒裝 LibreOffice 回 **503**、這份轉不出來回 **415** ——
+    前端兩種都退回 `text`。三種共用這一條路由(而不是另開兩條):
+    `require_user_file` 收 cookie,那份清單刻意只有幾條,見 auth.py。
+
+    以下是 `text`:
 
     這些格式是壓縮過的二進位,瀏覽器打不開,直接抓回去顯示只會是亂碼 ——
     但使用者最常附的就是這幾種,「點開確認是不是這份報價單」是很自然的動作。
@@ -209,6 +220,32 @@ def preview_as_text(
         raise HTTPException(status_code=400, detail="不合法的路徑")
     _require_visible_session(db, session_id, viewer)
     path = _existing_file(base_dir, session_id, filename)
+
+    if as_ == "pdf":
+        try:
+            pdf = officepreview.to_pdf(path)
+        except officepreview.Unavailable:
+            raise HTTPException(status_code=503, detail="這台主機沒有裝轉檔程式") from None
+        except officepreview.Failed:
+            raise HTTPException(status_code=415, detail="這份檔案轉不成 PDF") from None
+        # inline:要在 iframe 裡顯示。檔名用原檔名 + .pdf,瀏覽器 PDF 檢視器的標題才認得出是哪份
+        return FileResponse(
+            pdf,
+            media_type="application/pdf",
+            filename=Path(filename).stem + ".pdf",
+            content_disposition_type="inline",
+            headers=_FILE_HEADERS,
+        )
+    if as_ == "sheet":
+        try:
+            data = officepreview.sheets(path)
+        except officepreview.Failed:
+            raise HTTPException(status_code=415, detail="這份 Excel 讀不成表格") from None
+        return JSONResponse(
+            {"sheets": data, "max_rows": officepreview.MAX_ROWS, "max_cols": officepreview.MAX_COLS}, headers=_FILE_HEADERS
+        )
+    if as_ != "text":
+        raise HTTPException(status_code=400, detail="不支援的預覽方式")
 
     text = extract_text(path)
     if text is None:

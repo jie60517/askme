@@ -111,8 +111,9 @@ def test_一題問答產出的檔案要全部進得了下載清單(outputs, monk
     assert "說明.pdf" in files
     assert "簡報標題.pptx" in files
     assert "交付.zip" in files
-    # 原始的純文字檔留著
-    assert "料件清單.csv" in files and "說明.md" in files
+    # csv 原檔照列;轉成 PDF 的 .md 原稿不列(不然清單裡一堆 md),但留在磁碟上
+    assert "料件清單.csv" in files
+    assert "說明.md" not in files
     # 子資料夾裡的檔案被攤平到第一層,不然它等於不存在
     assert "備註.txt" in files
     # 清單檔是給後端看的中間產物,不可以出現在使用者面前
@@ -121,8 +122,12 @@ def test_一題問答產出的檔案要全部進得了下載清單(outputs, monk
     session_id = done[0]["session_id"]
     out = config.OUTPUT_DIR / session_id
     # 磁碟上的東西要跟清單一致 —— 清單是 list_output_files 掃出來的,兩者不一致
-    # 代表有人在它之後又動了資料夾
-    assert sorted(files) == sorted(p.name for p in out.iterdir() if p.is_file())
+    # 代表有人在它之後又動了資料夾。只差在藏起來的原稿與記它的那份清單
+    from app import outputs_common
+
+    hidden = {"說明.md", outputs_common.SOURCES_NAME}
+    assert (out / "說明.md").is_file()
+    assert sorted(files) == sorted(p.name for p in out.iterdir() if p.is_file() and p.name not in hidden)
 
     # 打包的內容:zipgen 排在最後,所以前面幾支的產出包得進去
     import zipfile

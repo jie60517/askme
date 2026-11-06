@@ -47,6 +47,14 @@ _CATEGORIES = {
         "account_disabled",
         "account_enabled",
         "role_changed",
+        # 某人的權限加減、角色本身的增改刪
+        "perms_changed",
+        "role_created",
+        "role_renamed",
+        "role_perms_changed",
+        "role_deleted",
+        # 有 Users 權限的一般帳號被防升權擋下:有人在試權限邊界
+        "users_action_denied",
         "password_reset",
         "password_changed",
         # 改密碼時「目前的密碼」打錯、打錯太多次被擋
@@ -100,7 +108,7 @@ SHOWN = {
 @router.get(
     "/audit",
     response_model=schemas.AuditPage,
-    dependencies=[Depends(auth.require_admin)],
+    dependencies=[Depends(auth.require_perm("security"))],
 )
 def list_audit(
     category: Optional[str] = None,

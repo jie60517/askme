@@ -166,3 +166,65 @@ def test_不支援的格式回_None(tmp_path):
     path.write_bytes(b"PK\x03\x04rest")
 
     assert extract.extract_text(path) is None
+
+
+def _noisy_png(path, size=(200, 120)):
+    """夠大(> 2KB)的圖:隨機雜點壓不太下去,不會被當成 icon 略過。"""
+    import random
+
+    from PIL import Image
+
+    img = Image.new("RGB", size)
+    img.putdata([tuple(random.randrange(256) for _ in range(3)) for _ in range(size[0] * size[1])])
+    img.save(path)
+    return path
+
+
+def test_pptx_的圖片要另存並寫明路徑(tmp_path):
+    from pptx import Presentation
+    from pptx.util import Inches
+
+    pic = _noisy_png(tmp_path / "shot.png")
+    prs = Presentation()
+    prs.slides.add_slide(prs.slide_layouts[5]).shapes.title.text = "只有字"
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    slide.shapes.add_picture(str(pic), Inches(1), Inches(1))
+    path = tmp_path / "deck.pptx"
+    prs.save(path)
+
+    out = tmp_path / "up"
+    out.mkdir()
+    lines = extract.extract_images(path, out)
+
+    assert len(lines) == 1 and "第 2 頁" in lines[0]
+    saved = out / "deck.pptx.img1.png"
+    assert saved.is_file() and saved.read_bytes() == pic.read_bytes()
+    assert saved.as_posix() in lines[0]
+
+
+def test_docx_的圖片要另存_小圖略過(tmp_path):
+    from docx import Document
+    from PIL import Image
+
+    big = _noisy_png(tmp_path / "big.png")
+    tiny = tmp_path / "tiny.png"
+    Image.new("RGB", (8, 8), "white").save(tiny)
+    doc = Document()
+    doc.add_paragraph("前言")
+    doc.add_picture(str(tiny))
+    doc.add_picture(str(big))
+    path = tmp_path / "spec.docx"
+    doc.save(path)
+
+    out = tmp_path / "up"
+    out.mkdir()
+    lines = extract.extract_images(path, out)
+
+    assert len(lines) == 1, "8x8 的小圖是 icon,不該存"
+    assert (out / "spec.docx.img1.png").read_bytes() == big.read_bytes()
+
+
+def test_其他格式不另存圖片(tmp_path):
+    path = tmp_path / "a.xlsx"
+    path.write_bytes(b"PK\x03\x04rest")
+    assert extract.extract_images(path, tmp_path) == []

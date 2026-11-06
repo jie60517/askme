@@ -995,7 +995,8 @@ def test_notify_offers_people_and_the_three_chat_groups():
     # 自己也選得到(流程跑完通知自己是正常的,跟聊天不同)
     assert "wf_eng" in values and "wf_cons" in values
     groups = [o["label"] for o in who["options"] if o.get("group")]
-    assert groups == ["All Consultant", "All Software Engineer", "ALL"]
+    # 每個角色一組(角色表的順序,預設角色在前)+ ALL
+    assert groups[:2] == ["All Consultant", "All Software engineer"] and groups[-1] == "ALL"
 
 
 def test_script_host_only_counts_a_live_client_connection(monkeypatch):
@@ -1042,15 +1043,26 @@ def test_script_types_decide_how_to_run_and_unknown_ones_block_the_run():
 
 
 def test_people_groups_match_the_chat_mention_menu():
-    """通知人員的群組跟聊天的 @ 選單要同一組(字與職稱),兩邊各寫一份,這條對字"""
+    """通知人員的群組跟聊天的 @ 選單要同一個規則:每個角色一組「All <角色名>」+ ALL,照角色表的順序。
+
+    後端從角色表算(`_groups`);前端照 @ 名單上後端給的 role_id / role_rank 分組排序(`mentionRoles`),
+    所以兩邊的順序來自同一個 `roles._sorted_roles`。這條對字與順序的來源。部署包不含前端,主機上跳過。
+    """
     from pathlib import Path
 
-    chat = (Path(__file__).resolve().parents[2] / "frontend" / "src" / "pages" / "Chat.tsx").read_text(encoding="utf-8")
-    for label, role in workflows.PEOPLE_GROUPS.values():
-        assert f"label: '{label}'" in chat, label
-    # 職稱字串跟 users.py 的常數一致(Chat 那邊用的是 adminApi 的常數,指向同一個字)
-    roles = {r for _, r in workflows.PEOPLE_GROUPS.values() if r}
-    assert roles == {users.ROLE_CONSULTANT, users.ROLE_ENGINEER}
+    from app import roles
+
+    src = Path(__file__).resolve().parents[2] / "frontend" / "src"
+    if not src.exists():
+        pytest.skip("找不到前端原始碼(部署包不含前端)")
+    chat = (src / "pages" / "Chat.tsx").read_text(encoding="utf-8")
+    assert "label: `All ${g.name}`" in chat and "label: 'ALL'" in chat
+    groups = (src / "lib" / "mentionGroups.ts").read_text(encoding="utf-8")
+    assert "role_rank" in groups and "role_id" in groups, "前端的分組與順序要照後端給的 role_id / role_rank"
+    # 後端:@ 名單給的順序 = Work Flow 群組的順序
+    ranks = roles.role_ranks()
+    by_rank = [name for _, (name, _) in sorted(ranks.items(), key=lambda kv: kv[1][1])]
+    assert [label for _, label in workflows._groups()][:-1] == [f"All {n}" for n in by_rank]
 
 
 def test_notify_list_drops_unknown_people_on_save_and_empty_list_blocks_run():

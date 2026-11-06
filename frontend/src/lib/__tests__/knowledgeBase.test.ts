@@ -32,4 +32,8 @@ describe('buildKnowledgeBaseLabels', () => {
     const labels = buildKnowledgeBaseLabels(config());
     expect(describeKnowledgeBase('kb-old', labels)).toBe('kb-old (removed)');
   });
+
+  it('一般模式(後端的保留代號 general)寫 General,不寫 (removed)', () => {
+    expect(describeKnowledgeBase('general', buildKnowledgeBaseLabels(config()))).toBe('General');
+  });
 });

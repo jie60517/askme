@@ -17,23 +17,49 @@ from .ids import FIELD_PATTERN
 MAX_CREDENTIAL_CHARS = 200
 MAX_TITLE_CHARS = 200
 
-#: 職稱在 API 上的合法值 —— **只有這兩個字串,加一個「清掉」的空字串**。
-#:
-#: ⚠️ 用 `Literal` 而不是 `str`:後端用字串相等判斷要不要給完整權限
-#: (`users.role_grants_full`),打錯大小寫(`Software Engineer`,大寫 E)會**靜悄悄**
-#: 把人降成唯讀,而畫面照樣顯示一個看起來合理的職稱。`Literal` 讓打錯字直接 422。
-#:
-#: ⚠️ **空字串不能拿掉** —— `PATCH /api/users/{u}` 的契約是「帶空字串 = 清掉職稱」
-#: (存 NULL,讀的那側退回 `users.DEFAULT_ROLE`),路由靠 `model_fields_set`
-#: 分辨「沒帶」和「帶了空的」。網頁的下拉選單到不了這條路(它送出前自己先擋),
-#: 但那是 UI 的第二道防線,不是 API 的契約。
-#:
-#: ⚠️ 這兩個字串跟 `users.ROLES` 是**同一份東西寫兩次**,而且必須寫兩次 ——
-#: `Literal` 只吃字面值,餵不進常數。`schemas` 是葉子模組(只 import `ids`),
-#: 反過來 import `users` 會把 `database` 的 engine 一起拖進來,連純 DTO 的測試
-#: 都要有 DATABASE_URL 才跑得動,所以不走那條路。**正本是 `users.ROLES`**,
-#: 兩邊漂掉由 `tests/test_users_role.py` 的釘樁測試擋下來。
-RoleName = Literal["Consultant", "Software engineer", ""]
+
+class Perms(BaseModel):
+    """一份完整的權限(`roles.FLAGS`)。
+
+    ⚠️ 欄位跟 `roles.PERM_KEYS` 是**同一份東西寫兩次**:`schemas` 是葉子模組(只 import `ids`),
+    反過來 import `roles` 會把 `database` 的 engine 一起拖進來。漂掉由 `tests/test_roles.py` 的釘樁測試擋下來。
+    """
+
+    ssh: bool = False
+    workflow: bool = False
+    usage: bool = False
+    security: bool = False
+    users: bool = False
+    ai_exec: bool = False
+
+
+class RoleOut(BaseModel):
+    id: str
+    name: str
+    perms: Perms
+    #: 預設角色(新帳號給它、不能刪)
+    is_default: bool = False
+    #: 掛著這個角色的帳號數(含停用的;有人用就不能刪)
+    member_count: int = 0
+    #: 通知名單用到「All <這個角色>」的 Work Flow 數(有就不能刪)
+    flow_refs: int = 0
+
+
+class CreateRoleRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+    perms: Perms = Field(default_factory=Perms)
+
+
+class UpdateRoleRequest(BaseModel):
+    # 沒帶 = 不動
+    name: Optional[str] = Field(default=None, min_length=1, max_length=40)
+    perms: Optional[Perms] = None
+
+
+class DeleteRolesRequest(BaseModel):
+    """一次刪好幾個(角色分頁左邊勾選後的「刪除 N 個角色」)。一個刪不掉就全部不刪。"""
+
+    ids: List[str] = Field(min_length=1, max_length=200)
 
 
 class HistoryItem(BaseModel):
@@ -134,6 +160,10 @@ class ShareablePerson(BaseModel):
     username: str
     display_name: str
     role: str
+    # 角色的 id 與它在角色表的第幾個:@ 選單的「All <角色>」照 role_id 分組、照 role_rank 排。
+    # 管理員的 role_id 是空的(他不是角色,不在任何角色群組裡)
+    role_id: str = ""
+    role_rank: int = -1
     # 個人設定的頭像(data URI)。None = 沒設過,畫面上顯示名字縮寫。
     # ⚠️ 這一欄會發給所有登入者,所以後端有長度上限(users.MAX_AVATAR_CHARS)。
     avatar: Optional[str] = None
@@ -243,6 +273,10 @@ class NoteOut(BaseModel):
     # /api/shareable-users 會把「自己」排除掉(分享給自己沒有意義),所以被 @ 的人
     # 打開時,查不到自己的顯示名稱,畫面上會變成「@jim」而別人看到的是「@吉姆」。
     mentioned_names: Dict[str, str] = Field(default_factory=dict)
+    # 被 @ 的人之中**看過了**的 → 什麼時候看的,照看的先後排。沒看的不在裡面。
+    # 「看過」= 他在視窗有焦點時打開了這組對話(`ConversationMention.seen_at`),
+    # 小夥伴氣泡跳出來不算。對話裡每個人拿到的都一樣(大家都看得到)。
+    seen: Dict[str, datetime] = Field(default_factory=dict)
     # 這則便條夾帶的檔名。下載網址是 /api/uploads/{attachment_sid}/{檔名}。
     attachments: List[str] = Field(default_factory=list)
     attachment_sid: Optional[str] = None
@@ -552,10 +586,17 @@ class MeResponse(BaseModel):
     ssh_mode: str = ""
     #: Work Flow 開了沒:部署的人放了 workflow_actions.json,而且 SSH 終端機有開(workflows.available)。
     #: 關著的時候側邊欄沒有 Work Flow、/workflow 是 NotFound、/api/workflows 一律 404。
-    #: 能不能用另外看 `can_terminal`(工程師 / 管理員)。
+    #: 能不能用另外看 `perms.workflow`。
     workflow_enabled: bool = False
+    #: 要不要畫吉祥物。**沒設過回 True**(opt-out)。
+    companion_visible: bool = True
+    #: 改過的快捷鍵(`users.clean_shortcuts` 的格式)。None = 全部照預設。
+    shortcuts: Optional[dict] = None
     #: 個人筆記開了沒(config.NOTEBOOK_ENABLED,預設開):側邊欄 Notes、對話裡存筆記的鈕都看它。關著時 /api/notebook 回 404
     can_notebook: bool = False
+    #: 這個人實際的權限(管理員全開)。側邊欄每一項、每個管理頁的進入都看它。
+    #: 前端**只拿它決定顯不顯示**;真正的擋在後端每一支端點(auth.has_perm / require_perm)
+    perms: Perms = Field(default_factory=Perms)
 
 
 class ThemeRequest(BaseModel):
@@ -583,6 +624,11 @@ class DisplayPrefsRequest(BaseModel):
     #: Bloub 的型態 / 顏色。白名單在 `users.COMPANION_SHAPES` / `COMPANION_COLORS`,同一條規矩。
     companion_shape: Optional[str] = Field(default=None, max_length=16)
     companion_color: Optional[str] = Field(default=None, max_length=16)
+    #: 要不要畫吉祥物。None = 這次沒帶。
+    companion_visible: Optional[bool] = None
+    #: 整份改過的快捷鍵,`{}` = 全部回預設。格式不對的那一筆在 `users.clean_shortcuts` 丟掉,不回 422;
+    #: 鍵數上限只是別讓人塞大字典(現在只有三個快捷鍵)。
+    shortcuts: Optional[dict] = Field(default=None, max_length=16)
 
 
 class AvatarRequest(BaseModel):
@@ -697,13 +743,16 @@ class AuditPage(BaseModel):
 class UserOut(BaseModel):
     username: str
     display_name: str
-    # "full" = 完整工具,null/其他 = 唯讀
+    # 舊欄位(不再讀),留著給舊的腳本看
     tools: Optional[str] = None
     disabled: bool
-    # 畫面上的職稱(@ 選單的副標)。⚠️ 它就是權限,見 users._FULL_ROLES。
-    # ⚠️ 這個宣告不能少:`users.list_users()` 一直有回這個欄位,但沒宣告的話
-    # Pydantic 會把它濾掉 —— 帳號管理頁就永遠看不到職稱。
+    # 實際算哪個角色的 id(空的、對不上的退回預設角色)與它在畫面上的名字。
+    # ⚠️ 每個欄位都要宣告:沒宣告的話 Pydantic 會把它濾掉
     role: Optional[str] = None
+    role_name: str = ""
+    # 實際權限(角色 + 個人加減)與個人加減本身(只有跟角色不同的那幾項)
+    perms: Perms = Field(default_factory=Perms)
+    own: Dict[str, object] = Field(default_factory=dict)
     created_at: Optional[datetime] = None
     password_changed_at: Optional[datetime] = None
     # 還在用發下去的預設密碼(尚未改過)
@@ -738,7 +787,7 @@ class AdminAccountOut(BaseModel):
 class CreateUserRequest(BaseModel):
     """新增帳號**只收帳號名**。
 
-    職稱一律是 `users.DEFAULT_ROLE`(Consultant)= 唯讀;要給完整權限就建完
+    角色一律是 `users.DEFAULT_ROLE`(Consultant);要給更多權限就建完
     之後改職稱,那一步會寫稽核。`display_name` 留著是給整合/腳本用的,
     網頁不送 —— 沒給就等於帳號名。
     """
@@ -750,9 +799,8 @@ class CreateUserRequest(BaseModel):
 
 class UpdateUserRequest(BaseModel):
     # 只帶想改的欄位,沒帶的不動。
-    # role 帶空字串 = 清掉(畫面上回到 users.DEFAULT_ROLE),沒帶 = 不動 ——
-    # 路由用 model_fields_set 分辨,跟 UpdateFolderRequest 同一個套路。
-    # ⚠️ **刻意沒有 `full` 欄位**(職稱就是權限)。權限由 `role` 推導,
-    # 留一個能單獨寫 tools 的欄位等於留一條讓兩者不一致的路。要調權限就改職稱。
     disabled: Optional[bool] = None
-    role: Optional[RoleName] = None
+    # 角色的 id(角色分頁那張表的 id)。找不到的角色 400。
+    role: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    # 這個人**完整**的權限清單(畫面上那份);後端只存跟角色不同的那幾項。沒帶 = 個人加減照留
+    perms: Optional[Perms] = None

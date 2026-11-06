@@ -268,7 +268,7 @@ def _previous_window(
     return lo_local - shift, hi_local - shift
 
 
-@router.get("/stats", response_model=schemas.StatsOut, dependencies=[Depends(auth.require_admin)])
+@router.get("/stats", response_model=schemas.StatsOut, dependencies=[Depends(auth.require_perm("usage"))])
 def get_stats(
     granularity: str = "day",
     start: Optional[date] = None,
@@ -448,7 +448,7 @@ def get_stats(
 @router.get(
     "/stats/running",
     response_model=schemas.RunningQuestionList,
-    dependencies=[Depends(auth.require_admin)],
+    dependencies=[Depends(auth.require_perm("usage"))],
 )
 def running_questions():
     """**現在**有誰在問問題。管理員專用,全站一覽。
@@ -510,7 +510,7 @@ def _apply_range(
 @router.get(
     "/stats/questions",
     response_model=schemas.QuestionUsageList,
-    dependencies=[Depends(auth.require_admin)],
+    dependencies=[Depends(auth.require_perm("usage"))],
 )
 def list_questions(
     user: Optional[str] = None,
@@ -672,7 +672,7 @@ def _step_totals(db: Session, record_ids: list) -> dict:
 @router.get(
     "/stats/questions/{record_id}",
     response_model=schemas.QuestionUsageDetail,
-    dependencies=[Depends(auth.require_admin)],
+    dependencies=[Depends(auth.require_perm("usage"))],
 )
 def question_detail(record_id: int, db: Session = Depends(get_db)):
     """單題的時間軸:第幾步、什麼工具、碰了哪個檔、那一輪耗掉多少 token。"""
@@ -702,8 +702,13 @@ def question_detail(record_id: int, db: Session = Depends(get_db)):
         if count >= 2
     ]
 
+    items = [schemas.StepItem.model_validate(s) for s in steps]
+    if record.deleted_at is not None:
+        # 刪除流程已經清過;這裡再遮一次,擋住修正之前就寫進去的舊資料
+        items = [i.model_copy(update={"target": None, "target_full": None, "detail": None}) for i in items]
+        repeats = []
     return schemas.QuestionUsageDetail(
         question=_usage_item(record, _step_totals(db, [record_id])),
-        steps=[schemas.StepItem.model_validate(s) for s in steps],
+        steps=items,
         repeats=repeats,
     )

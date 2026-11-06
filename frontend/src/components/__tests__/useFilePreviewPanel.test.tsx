@@ -90,7 +90,7 @@ describe('useFilePreviewPanel', () => {
 describe('FilePreviewPanel 的退場寬度', () => {
   // `none` 模式只畫「看不了,請下載」,不會去 fetch
   const items: LightboxItem[] = [
-    {name: 'a.bin', mode: 'none', previewUrl: '/p', downloadUrl: '/d', textUrl: null},
+    {name: 'a.bin', mode: 'none', previewUrl: '/p', downloadUrl: '/d', textUrl: null, convertUrl: null},
   ];
   // jsdom 沒有 matchMedia(預覽裡的 LoadingScreen 會問);一律回「不符合」
   beforeEach(() => {

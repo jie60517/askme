@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import config, ratelimit, security, usage_limit
 from . import auth as auth_dep
-from .database import Base, close_orphan_runs, engine, purge_expired_steps
+from .database import Base, close_orphan_runs, engine, ensure_columns, purge_expired_steps
 from .routers import (
     admin_users,
     ask,
@@ -59,6 +59,7 @@ def init_database() -> None:
         )
 
     Base.metadata.create_all(bind=engine)
+    ensure_columns()
     # **強制手機驗證開著、但管理員自己還沒綁 —— 寧可起不來。**
     #
     # 那個狀態沒有任何出路:所有人(含管理員)登入都會被 403 擋掉,而唯一能發
@@ -102,6 +103,11 @@ def init_database() -> None:
             )
 
     # 帳號只在資料庫裡,沒有種子檔:全新的資料庫由管理員登入帳號管理頁建第一個帳號。
+    # 角色表:全新的資料庫建兩個種子角色(Consultant、Software engineer)。之後每次開機只確認預設角色還在
+    from . import roles
+
+    if roles.ensure_seeded():
+        logger.info("角色:建立種子角色 %s", "、".join(r["name"] for r in roles.list_roles()))
     # 上次關機時還在跑的問答收尾,否則畫面上會永遠卡在「回答中」
     close_orphan_runs()
 

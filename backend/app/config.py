@@ -1,6 +1,8 @@
+import hashlib
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Optional, TypedDict
 
@@ -281,7 +283,12 @@ def default_knowledge_base() -> str:
 
 
 def get_knowledge_base(kb_id):
-    """找不到就退回預設值 —— 前端送了舊的 id(例如資料夾改了名)也不該讓整題失敗。"""
+    """找不到就退回預設值 —— 前端送了舊的 id(例如資料夾改了名)也不該讓整題失敗。
+
+    `general` 是一般模式的保留代號(見 GENERAL_BASE),不在專案清單裡。
+    """
+    if kb_id == GENERAL_KB_ID:
+        return GENERAL_BASE
     bases = knowledge_bases()
     default = _default_of(bases)
     wanted = kb_id or default
@@ -303,7 +310,7 @@ def all_known_roots() -> list:
     return roots
 
 
-def resolve_workdir(knowledge_base=None, explicit=None) -> str:
+def resolve_workdir(knowledge_base=None, explicit=None, user=None) -> str:
     """這一題的 claude 子行程要在哪個目錄裡跑。**cwd 的唯一推導入口。**
 
     存在的理由不是省行數,是**一致性**:agent.py 拿它決定子行程的 cwd,
@@ -315,8 +322,15 @@ def resolve_workdir(knowledge_base=None, explicit=None) -> str:
     子行程用知識庫的 workdir 跑,meta 卻記成 NULL(= 共用工作目錄)。
 
     explicit 優先,是為了讓「續問」能指定「當初那個目錄」而不是現在選的專案。
+
+    一般模式沒有專案的 workdir,是**這個帳號自己的那一格**(`general_workdir(user)`)。
+    ⚠️ 絕對不能落回 CLAUDE_WORKDIR —— 那是預設專案的工作目錄,一般模式就會載到它的 CLAUDE.md。
     """
-    return explicit or (knowledge_base or {}).get("workdir") or CLAUDE_WORKDIR
+    if explicit:
+        return explicit
+    if is_general(knowledge_base):
+        return general_workdir(user)
+    return (knowledge_base or {}).get("workdir") or CLAUDE_WORKDIR
 
 
 def all_workdirs() -> list:
@@ -677,6 +691,93 @@ def _warn_if_agent_knowledge_inside_a_workdir() -> None:
 
 
 _warn_if_agent_knowledge_inside_a_workdir()
+
+
+# ── 一般模式(`/general`)──────────────────────
+#
+# 這一題**不帶任何專案**:沒有專案說明、不掛程式碼樹 / 知識目錄 / 專案 skill,
+# 工作目錄是**每個人自己的一格**,工具照角色(不因為一般模式放寬)。
+# 「一般」是保留的專案代號,不會出現在專案清單裡;對話紀錄記的就是它,續問留在一般模式。
+# ⚠️ workspace 底下不要建一個叫 general 的資料夾:那個專案永遠選不到(這個代號先被一般模式認走)。
+GENERAL_KB_ID = "general"
+
+# 每個人一般模式的資料夾放在這底下(`<這裡>/<帳號>/`,第一題才建)。
+#
+# ⚠️ **不能放在任何專案的 workdir(含 WORKSPACE_DIR)底下,也不能放在 agent-knowledge 底下。**
+# claude CLI 會從 cwd 一路往上讀每一層的 CLAUDE.md —— 放在專案底下,那個專案的規則就跟著進來,
+# 一般模式等於沒做;放在 agent-knowledge 底下,唯讀帳號的讀取範圍(cwd)就蓋到所有人的上傳。
+# 下面那段開機檢查踩到會在 log 叫出來(跟 AGENT_KNOWLEDGE_DIR 同一套)。
+GENERAL_WORKDIR = Path(os.environ.get("GENERAL_WORKDIR", "~/askme_general")).expanduser()
+
+GENERAL_BASE = {
+    "id": GENERAL_KB_ID,
+    "label": "一般",
+    "kind": "general",
+    "default_model": None,
+    "effort": None,
+    # 真正的工作目錄看帳號,由 resolve_workdir(..., user=) 給(general_workdir);這裡留空
+    "workdir": None,
+    "code_roots": [],
+    "knowledge_dirs": [],
+    "skill_dir": None,
+    "note": "",
+    "suggestions": [],
+}
+
+_SAFE_USER_RE = re.compile(r"[^A-Za-z0-9_.-]")
+
+
+def is_general(base) -> bool:
+    """這一題是不是一般模式(收 dict 或 id)。"""
+    if isinstance(base, str):
+        return base == GENERAL_KB_ID
+    return bool(base) and base.get("kind") == "general"
+
+
+def general_workdir(user: Optional[str]) -> str:
+    """這個帳號一般模式的工作目錄,不存在就建。
+
+    帳號名本來就只有英數字(Users.tsx 的 USERNAME_RULE),這裡再濾一次:路徑是從它組出來的,
+    濾掉之後跟原字串不一樣(或是空的)就改用雜湊,不讓 `..`、斜線這類東西進到路徑裡。
+    """
+    name = user or "_anonymous"
+    safe = _SAFE_USER_RE.sub("", name)
+    if safe != name or safe in ("", ".", ".."):
+        safe = "u_" + hashlib.sha256(name.encode("utf-8")).hexdigest()[:16]
+    path = GENERAL_WORKDIR / safe
+    path.mkdir(parents=True, exist_ok=True)
+    return str(path)
+
+
+def _warn_if_general_inside_a_workdir() -> None:
+    """GENERAL_WORKDIR 落在某個專案的工作目錄或 agent-knowledge 底下就叫一聲(理由見 GENERAL_WORKDIR)。"""
+    try:
+        here = GENERAL_WORKDIR.resolve()
+        agent_dir = AGENT_KNOWLEDGE_DIR.resolve()
+    except OSError:
+        return
+    parents = [("agent-knowledge", agent_dir)]
+    try:
+        parents.append(("WORKSPACE_DIR", WORKSPACE_DIR.resolve()))
+    except OSError:
+        pass
+    for base in knowledge_bases():
+        try:
+            parents.append((base["id"], Path(base["workdir"]).resolve()))
+        except (OSError, TypeError):
+            continue
+    for name, wd in parents:
+        if here == wd or wd in here.parents:
+            logger.warning(
+                "GENERAL_WORKDIR(%s)落在 %s(%s)底下 —— 一般模式會讀到那裡的 CLAUDE.md。"
+                "請用 GENERAL_WORKDIR 把它移到所有 workdir 與 agent-knowledge 之外。",
+                here,
+                name,
+                wd,
+            )
+
+
+_warn_if_general_inside_a_workdir()
 # 單檔上傳上限(MB)。0 或負數 = 不限制。
 #
 # 圖片在瀏覽器端已經先縮到長邊 1568px 才上傳(見 frontend/src/lib/image.ts),
@@ -702,6 +803,12 @@ MAX_REQUEST_MB = int(
 # ⚠️ 不放 AGENT_KNOWLEDGE_DIR:那裡是 claude 讀得到的地方(上傳、產出檔),
 # 而筆記永遠不會送給 claude。
 NOTEBOOK_DIR = Path(os.environ.get("NOTEBOOK_DIR", str(DATA_DIR / "notebook")))
+# Word / 簡報預覽轉出來的 PDF(`officepreview`)。7 天沒人看就清掉。
+# 放 data/ 底下、不放 AGENT_KNOWLEDGE_DIR:這裡是**所有人**的附件轉出來的,claude 不該讀得到。
+PREVIEW_CACHE_DIR = Path(os.environ.get("PREVIEW_CACHE_DIR", str(DATA_DIR / "preview-cache")))
+# LibreOffice 的執行檔。空的就自己找(PATH 上的 soffice / libreoffice,Windows 的預設安裝位置);
+# 找不到的話 Word / 簡報預覽退回純文字。
+SOFFICE_PATH = os.environ.get("SOFFICE_PATH", "")
 # 整個個人筆記功能的開關。**預設開**。關著的時候側邊欄沒有 Notes、對話裡沒有存筆記的鈕(前端看 /api/me 的 can_notebook),
 # `/api/notebook`(含多人同時編輯那條 WebSocket)全部當作不存在。
 # 要關:.env 加 `NOTEBOOK_ENABLED=0` 再重啟,不用重新打包。資料表照樣建、data/notebook 不會被刪。

@@ -9,6 +9,7 @@
  * 手動觸發、一天沒幾次的動作,省那一次請求換來一個會過期的名字不划算。
  */
 import {getConfig, type AppConfig} from './chatApi';
+import {GENERAL_KB_ID, GENERAL_LABEL} from './generalMode';
 
 export type KnowledgeBaseLabels = Map<string, string>;
 
@@ -23,7 +24,10 @@ export async function knowledgeBaseLabels(): Promise<KnowledgeBaseLabels> {
 
 /** 從手上的 config 建 id → 顯示名稱(`knowledgeBaseLabels` 抓完 `/api/config` 之後用它)。 */
 export function buildKnowledgeBaseLabels(config: AppConfig): KnowledgeBaseLabels {
-  return new Map(config.knowledge_bases.map((kb) => [kb.id, kb.label]));
+  const labels = new Map(config.knowledge_bases.map((kb) => [kb.id, kb.label]));
+  // 一般模式(`/general`)是後端的保留代號、不在專案清單裡 —— 不補的話答案底下會寫「general (removed)」
+  labels.set(GENERAL_KB_ID, GENERAL_LABEL);
+  return labels;
 }
 
 /**

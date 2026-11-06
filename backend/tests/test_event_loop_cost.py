@@ -92,7 +92,8 @@ def test_list_active_仍帶頭像與職稱且不比對密碼(accounts, monkeypat
     assert by_name["poll_b"]["role"] == users.DEFAULT_ROLE
     assert by_name["poll_admin"]["role"] == users.ADMIN_ROLE
     # 一般帳號也打得到這份清單,不能多帶權限或密碼狀態出去
-    assert set(by_name["poll_a"]) == {"username", "display_name", "role", "avatar"}
+    # role_id / role_rank 是角色的 id 與順序(「All <角色>」群組用),不是權限
+    assert set(by_name["poll_a"]) == {"username", "display_name", "role", "role_id", "role_rank", "avatar"}
 
 
 def test_從工作執行緒_emit_訂閱者收得到():

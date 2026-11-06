@@ -1455,7 +1455,7 @@ export function FilePanel({sessionId, home, maxUploadMb, isDisabled, onActivity,
                 /*
                  * 路徑是「打什麼就是什麼」:關掉手機鍵盤的自動大寫、自動校正、拼字檢查
                  * (iOS 會把 `/srv/app-b` 校正成別的字、第一個字母自動大寫,而 Linux 路徑分大小寫)。
-                 * 跟上面的 ARIA 一樣塞在這個展開裡,理由見 `lib/nativeInputHints.ts`。
+                 * 共用 `lib/nativeInputHints.ts` 那一份(TextInput 0.7 的正式屬性)。
                  */
                 ...NO_AUTOFIX,
               }}

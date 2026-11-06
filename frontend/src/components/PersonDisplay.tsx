@@ -292,10 +292,17 @@ export function PersonAvatar({
   username,
   fallbackName,
   size,
+  xstyle,
 }: {
   username: string;
   fallbackName?: string | null;
   size: AvatarSize;
+  /**
+   * 給 `Avatar` 本身的樣式。目前只有 `NoteReceipt` 用:`HoverCard` 在每顆頭像外面包了一層,
+   * `AvatarGroup` 靠「不是第一個子元素」做的重疊就失效了(每顆都是自己那層的第一個),
+   * 重疊的負邊距只能從這裡補給第二顆之後的頭像。
+   */
+  xstyle?: stylex.StyleXStyles;
 }) {
   // 名字只算一次:標題、Avatar 的縮寫退路都用它,分開算就有機會分岔
   const label = personLabel(username, fallbackName);
@@ -313,6 +320,7 @@ export function PersonAvatar({
         size={size}
         style={avatarTint(username)}
         tooltip={false}
+        xstyle={xstyle}
       />
     </HoverCard>
   );

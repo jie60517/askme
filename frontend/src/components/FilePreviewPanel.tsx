@@ -63,6 +63,15 @@ const PANEL_IN_REDUCED = stylex.keyframes({
 
 const styles = stylex.create({
   panel: {
+    // 標題列 + 內容區直向排,內容區吃剩下的高度(見 `body`)。Card 自己是一般區塊排版
+    display: 'flex',
+    flexDirection: 'column',
+    /*
+     * 寬度就是 `width`(使用者拉的那個),**不要被內容撐寬**:flex 項目預設最小寬度 = 內容最小寬度,
+     * Excel 表格(欄寬下限加起來 900 多 px)會把面板撐到快一倍寬,1366 寬的視窗聊天欄被擠成一條。
+     * 表格自己會左右捲。
+     */
+    minWidth: 0,
     animationName: {
       default: PANEL_IN,
       '@media (prefers-reduced-motion: reduce)': PANEL_IN_REDUCED,
@@ -123,6 +132,14 @@ const styles = stylex.create({
       '@media (prefers-reduced-motion: reduce)':
         'opacity var(--duration-fast-max) var(--ease-standard), width 0s linear var(--duration-fast-max)',
     },
+  },
+  /**
+   * 內容區吃掉標題列以外的高度。不能寫 `height="100%"`:100% 是整張卡的高,加上標題列就比畫面高一截
+   * (1920×1080 量到超出 33px)—— PDF 框底部被切掉、外面多一條捲軸,Excel 表格的橫向捲軸整條在畫面外。
+   */
+  body: {
+    flexGrow: 1,
+    minHeight: 0,
   },
 });
 
@@ -266,7 +283,7 @@ export function FilePreviewPanel({
           </HStack>
         }
       />
-      <VStack width="100%" height="100%" isScrollable>
+      <VStack width="100%" isScrollable xstyle={styles.body}>
         <Preview item={item} />
       </VStack>
     </Card>

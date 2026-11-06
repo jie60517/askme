@@ -27,12 +27,19 @@ afterEach(cleanup);
 
 const box = (name: string) => screen.queryByRole('textbox', {name}) ?? screen.queryByLabelText(name);
 
+/**
+ * 鎖住的欄位。Astryx 0.7 起停用的 TextInput 不用原生 `disabled`,改成 `aria-disabled` + 唯讀
+ * (留在 Tab 順序裡,報讀程式念得到「無法使用」),所以兩個都要成立才算鎖住。
+ */
+const isLocked = (el: Element | null) =>
+  el?.getAttribute('aria-disabled') === 'true' && (el as HTMLInputElement).readOnly;
+
 describe('HostLogin', () => {
   it('三格唯讀欄位(副標拆出主機與帳號);連上那一下按鈕變成「已連線」', () => {
     const {rerender} = render(<HostLogin host={MAIN} isConnected={false} />);
     expect((box('主機') as HTMLInputElement).value).toBe('app-server');
     expect((box('帳號') as HTMLInputElement).value).toBe('deploy');
-    for (const name of ['主機', '帳號', '密碼']) expect((box(name) as HTMLInputElement).disabled).toBe(true);
+    for (const name of ['主機', '帳號', '密碼']) expect(isLocked(box(name))).toBe(true);
     expect(screen.queryByRole('button', {name: '已連線'})).toBeNull();
 
     rerender(<HostLogin host={MAIN} isConnected />);

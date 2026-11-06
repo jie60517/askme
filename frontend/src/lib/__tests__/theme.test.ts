@@ -6,6 +6,8 @@
  * 期間 <html> 掛著 `vt-theme`(global.css 只認它,不碰 SSH 那段的 `vt-terminal`),
  * 連按兩下時只有最後一段結束才拿掉;沒有就當場換。
  *
+ * `chooseTheme`(設定裡 Appearance 那排 Light / Dark):選到現在這個不重送,換了才寫回伺服器。
+ *
  * 後兩組:
  *  - `useThemeMode` 的 snapshot 要跟屬性**同一刻**換 —— update 之前任何 render 都還是舊佈景;
  *  - 跨分頁同步進來時,這一頁還沒跑的那段 update 要作廢,不能晚一步把畫面換回去。
@@ -13,7 +15,8 @@
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {act, cleanup, renderHook} from '@testing-library/react';
 
-import {THEME_VT_CLASS, setTheme, toggleTheme, useThemeMode} from '../theme';
+import {api} from '../api';
+import {THEME_VT_CLASS, chooseTheme, setTheme, useThemeMode} from '../theme';
 
 vi.mock('../api', () => ({api: {put: vi.fn(() => Promise.resolve())}}));
 
@@ -101,8 +104,8 @@ describe('setTheme', () => {
   it('過場還沒換過去前再按一次切換 → 切回去(以想要的那個為準),畫面一直沒動', async () => {
     const runs = fakeViewTransitions();
     const {result} = renderHook(() => useThemeMode());
-    act(() => toggleTheme()); // dark → light(還在等 update)
-    act(() => toggleTheme()); // 想要的又回到 dark
+    act(() => chooseTheme('light')); // dark → light(還在等 update)
+    act(() => chooseTheme('dark')); // 想要的又回到 dark
     act(() => runs[0].update());
     act(() => runs[1].update());
     expect(result.current).toBe('dark');
@@ -134,5 +137,18 @@ describe('setTheme', () => {
     expect(runs).toHaveLength(0);
     expect(result.current).toBe('light');
     expect(root.getAttribute('data-theme')).toBe('light');
+  });
+});
+
+describe('chooseTheme', () => {
+  it('選到現在想要的那一個什麼都不做;換了才切過去並寫回伺服器', () => {
+    chooseTheme('dark');
+    vi.mocked(api.put).mockClear();
+    chooseTheme('dark');
+    expect(api.put).not.toHaveBeenCalled();
+    chooseTheme('light');
+    expect(root.getAttribute('data-theme')).toBe('light');
+    expect(api.put).toHaveBeenCalledTimes(1);
+    expect(api.put).toHaveBeenCalledWith('/api/me/theme', {theme: 'light'});
   });
 });

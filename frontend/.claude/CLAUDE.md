@@ -3,33 +3,35 @@
 Project-specific guidance for AI coding agents.
 
 <!-- ASTRYX:START -->
-Astryx v0.4.4 · 158 components
+Astryx v0.7.8 · 174 components
 CLI: run every command as `npx astryx <cmd>` (shown below as `astryx ...`).
 
-SETUP (once, in your app entry e.g. main.tsx) — without these, components render unstyled:
+SETUP (once, in app entry e.g. main.tsx) — without these, components render unstyled:
   import "@astryxdesign/core/reset.css";
   import "@astryxdesign/core/astryx.css";
 
-WORKFLOW — discover, don't guess. Before writing UI:
-1. `astryx build "<idea>"` — START HERE: returns a kit (closest [page] + [block]s + [component]s). No args = full playbook.
-2. `astryx template <name> [--skeleton]` — scaffold the [page]/[block]s it named, or study their layout. Templates are reference code.
-3. `astryx component <Name>` — props + examples for every component you use.
+WORKFLOW — start every page from a template, never from scratch:
+1. `astryx build "<idea>"` — names the template to scaffold from and the parts it lacks.
+2. `astryx template <name> <path>` — scaffold it; keep its frame, gap and padding; replace the content.
+3. `astryx template <Block>` for parts it lacks; `astryx component <Name>` to read props before using one.
+Changing an existing page? Keep it: skip step 2 and add blocks/components inside its sections.
+Before you deliver a build, run `astryx doctor --built <dir>`; don't deliver it if it fails.
 
 RULES:
-- No <div> — components do all layout/spacing, page frame included.
-- Frame first: read `astryx docs layout` before writing any page or screen — page frame, region widths, breakpoint behavior.
-- Dense data = rows (Table, List/Item), never Card-wrapped list items; Card is for standalone widgets. Status = StatusDot/Token; Badge = counts only.
-- Custom styling: component props first; else style/className with tokens — var(--color-*|--spacing-*|--radius-*). No raw hex/px. (This project does have the StyleX compiler — see 「這個專案的例外與慣例」 below; no Tailwind.)
-- Tokens for every value (`astryx docs tokens`). Brand/accent belongs in the theme (`astryx theme list` / `theme add <slug>`, or `astryx theme template` for a custom one) — never override --color-* in :root.
-- SELF-CHECK before you finish: re-read the file and replace any raw <div>/<span> layout, imported .css/@apply, or hardcoded value (#hex, 16px) with the component or a token (var(--color-*|--spacing-*|…)). If unsure a component/prop exists, run `astryx component <Name>` / `astryx search "<thing>"`; don't hand-roll CSS.
+- No <div> — components handle all layout and spacing.
+- Read `astryx docs layout` before changing a template's frame.
+- Dense data = rows (Table, List/Item), not Card-wrapped lists. Badge = counts only.
+- Style with component props first, then the xstyle prop / StyleX tokens. No raw hex/px.
+- Palettes and custom colors go through the theme, never :root overrides. Run `astryx theme add <slug>` to import; `theme eject <slug>` only forks source. See `astryx docs theme`.
+- SELF-CHECK: re-read the file; replace any className=, style={{…}}, raw <div>/<span>, imported .css/@apply, or hardcoded #hex/px with the component or the xstyle prop + a token.
 
-MORE CLI:
-  search "<query>"   find any component / hook / doc / template / block
-  component --list   158 components by category
-  template --list    page + block recipes
-  docs <topic>       color, elevation, icons, illustrations, internationalization, layout, migration, motion, principles, shape, spacing, styling, theme, tokens, typography
-  swizzle <Name>     eject component source for deep customization
-  upgrade --apply    run after any @astryxdesign/core bump
+`astryx help` lists every command. Key ones beyond the workflow:
+  search "<query>"   find any component / hook / doc / template
+  discover <words>   integrations you could add
+  docs <topic>       getting-started, principles, tokens, theme … (`astryx docs` lists all)
+  docs cli           commands and API reference
+  docs authoring     build an integration package, and every field it holds
+  upgrade --from <old version> --apply   run after a dependency bump
 <!-- ASTRYX:END -->
 
 <!-- 專案補充(不在 ASTRYX 產生的區塊裡,重跑 astryx init 不會被蓋掉) -->
@@ -71,6 +73,9 @@ MORE CLI:
   值 520px 跟 `slashCommand.tsx` 的 `MENU_MAX_HEIGHT` 同一個,改一個要改另一個。不要再新增這種選擇器。
   節點外觀裡有幾個**沒有框的原生輸入**(大標題、圖片說明、資料庫的格子 `note-db-input`):Astryx 的輸入框都有框,
   一格一格框起來太吵 —— 跟大標題同一個理由的刻意例外,樣式一樣只用 token。
+- **輸入框底列「專案」那一格的過場 `components/ComposerSlot.tsx` 用裸 `<span>` + 寫死的動畫值**:
+  WAAPI 要直接拿到 DOM 元素量寬度、掛動畫;keyframes 裡的模糊 2px 與時間吃不到 CSS 變數,而且是動畫參數不是版面數值。
+  刻意的例外,不要換成 Stack;版面上的值(gap 之類)仍然用 token。
 - **圖一律 `aria-hidden` + 配一份文字等價物。**
   recharts 沒有元件幫忙做,要自己補。等價物給到什麼程度看它是主資料還是補充:
   - **主資料的圖配整份 sr-only 表格**,每一格都要讀得到(見 `TrendChart.tsx` 的
@@ -94,6 +99,8 @@ MORE CLI:
      與 `src/lib/usageLimit.ts`(答完之後那句「本次耗用 … 剩餘 … 後重置」)。
      標點用全形,跟 kit 的「完成了!」同一套。
      跟 kit 預設台詞同一個腔,不要翻成英文。
+     ⚠️ **吉祥物沒在聽時這幾句改成 toast 發出來,字一樣是中文**(`components/PetSpeechToast.tsx`:
+     Settings 把吉祥物關掉、手機、或還在載入)。toast 上那顆 `Open` 照全站慣例英文。
   3. **SSH 終端機頁 `/ssh` 的內容是中文**(`pages/Terminal.tsx`、`components/terminal/*`):
      頁名「SSH 終端機」、檔案欄、Banner 的斷線原因、刪除確認。側邊欄那一列 `SSH Server` 照慣例是英文。
      ⚠️ **例外的例外:`HostStage` 的 `status`(Connecting to… / Connected to… / Idle)是英文** ——
@@ -103,7 +110,7 @@ MORE CLI:
      後端的 `test_close_messages_match_the_frontend_word_for_word` 會讀前端原始碼對。
   4. **「有新版本 / 重新整理」那則 toast 是中文**:`components/UpdateWatcher.tsx`
      (上版之後舊分頁自己換到新版,見 `lib/appVersion.ts`)。
-     ⚠️ 這是唯一一則中文的**全站** toast —— 旁邊 `lib/toast.ts` 的其他呼叫端
+     ⚠️ 除了它與上面吉祥物那幾句(`PetSpeechToast`),全站的 toast 都是英文 —— 旁邊 `lib/toast.ts` 的其他呼叫端
      (`Answer copied.`、`Could not …`)仍然全是英文,不要跟著一起翻。
   5. **個人筆記頁 `/notes` 的內容是中文**(`pages/Notes.tsx`):狀態字、刪除確認。側邊欄那一列 `Notes` 是英文;
      ⚠️ **例外的例外:筆記頁左邊那一欄是英文**(跟主側邊欄一樣)—— 標題 Notes、Search、

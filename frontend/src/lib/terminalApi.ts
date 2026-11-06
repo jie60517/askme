@@ -212,14 +212,25 @@ export function formatMtime(mtimeSec: number): string {
 
 // ── WebSocket ────────────────────────────────────────────────────────
 
-/** `ws(s)://…/api/terminal/ws`,跟 axios 同一個 base(留空 = 同源)。 */
+/**
+ * 後端某一條 WebSocket 的網址(`ws(s)://…<path>`),跟 axios 同一個 base(留空 = 同源)。
+ * SSH 終端機與對話頁的即時推送(`notesLive`)共用這一支。
+ */
+export function apiWsUrl(
+  path: string,
+  base: string = import.meta.env.VITE_API_BASE || '',
+  loc: {protocol: string; host: string} = window.location,
+): string {
+  if (base) return base.replace(/^http/, 'ws').replace(/\/$/, '') + path;
+  return `${loc.protocol === 'https:' ? 'wss' : 'ws'}://${loc.host}${path}`;
+}
+
+/** `ws(s)://…/api/terminal/ws`。 */
 export function terminalWsUrl(
   base: string = import.meta.env.VITE_API_BASE || '',
   loc: {protocol: string; host: string} = window.location,
 ): string {
-  const path = '/api/terminal/ws';
-  if (base) return base.replace(/^http/, 'ws').replace(/\/$/, '') + path;
-  return `${loc.protocol === 'https:' ? 'wss' : 'ws'}://${loc.host}${path}`;
+  return apiWsUrl('/api/terminal/ws', base, loc);
 }
 
 export type TerminalHandlers = {

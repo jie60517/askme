@@ -80,6 +80,20 @@ export function officePreviewTextUrl(
 }
 
 /**
+ * 同一條路由的另外兩種給法:
+ * `pdf` = Word / 簡報轉成的 PDF,`sheet` = Excel 每張工作表的值(JSON)。
+ * 轉不了時後端回 503(主機沒有轉檔程式)或 415(這份轉不出來),燈箱退回純文字。
+ */
+export function officePreviewUrl(
+  scope: 'files' | 'uploads',
+  sessionId: string,
+  name: string,
+  as: 'pdf' | 'sheet',
+): string {
+  return `${officePreviewTextUrl(scope, sessionId, name)}?as=${as}`;
+}
+
+/**
  * 檔案大小。`null` = 磁碟上找不到這個檔案(後端的 `missing`)。
  *
  * 用 1024 進位並且**只留一位小數**:檔案區的用途是「認出這是不是我要的那份」,

@@ -88,6 +88,21 @@ export const setCompanion = companion.set;
 export const useCompanion = companion.use;
 export const adoptServerCompanion = companion.adopt;
 
+// ── 要不要畫吉祥物 ────────────────────────────────────────────────────
+
+/**
+ * Settings → Companion 最上面那顆 Show companion。**沒設過是畫**(opt-out,後端 NULL = 畫):
+ * 上線之後沒有人會突然發現吉祥物不見了。關掉時它講的那幾句(@ 提及、分享、額度)改走 toast(`components/PetSpeechToast.tsx`)。
+ * 存成 'on' / 'off' 是為了跟上面共用 `choiceStore`(本機先套、伺服器之後追上)。
+ */
+const companionShown = choiceStore('t100_companion_visible', oneOf(['on', 'off'] as const), 'on');
+export const setCompanionVisible = (visible: boolean) => companionShown.set(visible ? 'on' : 'off');
+export const useCompanionVisible = (): boolean => companionShown.use() === 'on';
+/** 伺服器那份是布林;`undefined`(舊後端沒這個欄位)不動本機那份 */
+export const adoptServerCompanionVisible = (value?: boolean | null) => {
+  if (typeof value === 'boolean') companionShown.adopt(value ? 'on' : 'off');
+};
+
 // ── Bloub 的型態 ──────────────────────────────────────────────────────
 
 /**

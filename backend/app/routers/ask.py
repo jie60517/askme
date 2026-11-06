@@ -105,16 +105,19 @@ def _finalize(run: runs.Run, result: dict) -> None:
     db = SessionLocal()
     try:
         record = db.get(models.QARecord, run.record_id)
-        if record is not None:
+        # 題目還在跑時對話被刪:刪除流程已經把內容清掉,這裡只補數字,不把內容寫回去
+        deleted = record is not None and record.deleted_at is not None
+        if record is not None and not deleted:
             record.answer = result["answer"]
-            record.success = result["success"]
             record.error = result["error"]
-            record.duration_ms = result.get("duration_ms")
-            record.cost_usd = result.get("cost_usd")
             record.sources = (
                 json.dumps(run.sources, ensure_ascii=False) if run.sources else None
             )
             record.output_files = ",".join(output_files) if output_files else None
+        if record is not None:
+            record.success = result["success"]
+            record.duration_ms = result.get("duration_ms")
+            record.cost_usd = result.get("cost_usd")
             record.status = "done"
 
             # 流水帳。**要先清再寫**:同一個 record_id 理論上只會收尾一次,
@@ -126,9 +129,11 @@ def _finalize(run: runs.Run, result: dict) -> None:
                 db.query(models.QAStep).filter(
                     models.QAStep.qa_record_id == record.id
                 ).delete(synchronize_session=False)
+                # 已刪的那題一樣只留數字:讀了哪個檔、grep 什麼、跑什麼指令都不留(同刪除流程)
+                hidden = {"target": None, "target_full": None, "detail": None} if deleted else {}
                 db.bulk_insert_mappings(
                     models.QAStep,
-                    [{"qa_record_id": record.id, **step} for step in run.steps],
+                    [{"qa_record_id": record.id, **step, **hidden} for step in run.steps],
                 )
 
         # claude session id 只在「這一輪真的跑完」時才記下來。中途被中斷就不寫,
@@ -267,7 +272,7 @@ def _workflow_context(db: Session, conv_id: str) -> str:
 
 async def _execute(run: runs.Run, **kwargs) -> None:
     """背景執行一題問答。這個 task 的生命週期跟任何一條 HTTP 連線都無關。"""
-    gen = agent.stream_agent(**kwargs)
+    gen = agent.stream_agent_retrying(**kwargs)
     result: Optional[dict] = None
     try:
         async for event in gen:
@@ -448,7 +453,19 @@ async def ask(
             .scalar()
         )
         knowledge_base = config.get_knowledge_base(kb)
-        switched_kb = (
+        # 進出一般模式也算換:一般模式的 session 在每個人自己那一格,跟專案的目錄不同。
+        # 另外判斷是因為一個專案都沒有的時候,前面那幾題記的專案是空的,上面那條比不出來。
+        last_record = (
+            db.query(models.QARecord.knowledge_base)
+            .filter(models.QARecord.conversation_id == conv_id)
+            .filter(models.QARecord.deleted_at.is_(None))
+            .order_by(models.QARecord.created_at.desc())
+            .first()
+        )
+        switched_mode = last_record is not None and config.is_general(
+            last_record[0] or ""
+        ) != config.is_general(knowledge_base)
+        switched_kb = switched_mode or (
             current_kb is not None
             and knowledge_base is not None
             and knowledge_base["id"] != current_kb
@@ -516,8 +533,11 @@ async def ask(
         #
         # meta.workdir 是 NULL 的對話,session 存在 CLAUDE_WORKDIR 底下 ——
         # resolve_workdir 沒拿到 explicit 時會落到那裡。
+        #
+        # 一般模式的新 session 建在**這組對話 owner** 自己那一格;
+        # 共用對話裡別人續問走的是上面那條 meta.workdir,不會換到他自己的格子。
         if is_new_conversation:
-            claude_workdir = config.resolve_workdir(knowledge_base)
+            claude_workdir = config.resolve_workdir(knowledge_base, user=record_owner)
         else:
             claude_workdir = config.resolve_workdir(explicit=meta.workdir if meta else None)
 
@@ -671,11 +691,20 @@ def _visible_run(run_id: str, viewer: Optional[str], db: Session) -> runs.Run:
     共用者也看得到 —— 而且是**同一條串流**(runs.follow 支援多訂閱者),
     所以他跟發問者一樣,即時看得到「正在讀哪支程式、正在 grep 什麼」。
     """
+    gone = HTTPException(status_code=404, detail="這題已經結束太久,請直接看對話紀錄")
     run = runs.get(run_id)
     if run is None:
-        raise HTTPException(status_code=404, detail="這題已經結束太久,請直接看對話紀錄")
-    if run.owner != viewer and not shares.can_access(db, run.conversation_id, viewer):
-        raise HTTPException(status_code=404, detail="這題已經結束太久,請直接看對話紀錄")
+        raise gone
+    # 對話刪掉之後,run 還會在記憶體裡留 10 分鐘;而刪掉的 conversation_id 誰都能拿去重新發問、
+    # 變成新的擁有者。所以要看這一題本身還在不在,共用者還要確認擁有者還是原本那個人。
+    record = db.get(models.QARecord, run.record_id)
+    if record is None or record.deleted_at is not None:
+        raise gone
+    if run.owner != viewer and not (
+        shares.owner_of(db, run.conversation_id) == run.owner
+        and shares.can_access(db, run.conversation_id, viewer)
+    ):
+        raise gone
     return run
 
 

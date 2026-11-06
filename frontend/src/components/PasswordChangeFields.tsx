@@ -1,15 +1,16 @@
 /**
- * 改密碼的三格(目前的密碼 / 新密碼 / 再輸入一次)—— 修改密碼對話框(`ChangePasswordDialog`)
- * 與強制改密碼頁(`pages/ForcePasswordChange`)共用,兩個改密碼畫面的規則才不會不一樣。
+ * 改密碼的三格(目前的密碼 / 新密碼 / 再輸入一次)—— 個人設定裡改密碼那一列
+ * (`AccountSettingsDialog` 的 Account 區)與強制改密碼頁(`pages/ForcePasswordChange`)共用,
+ * 兩個改密碼畫面的規則才不會不一樣。
  *
  * 錯誤一律跟登入頁同一個樣子(欄位紅框 + 從欄位底下長出來的訊息框,見 `FieldMessage.tsx`):
  * 後端回來的錯誤(多半是目前的密碼不對)掛在「Current password」底下;太短掛「New password」;
  * 兩次不一致掛「New password again」。後兩個是打字當下就跳的檢查,用 `role="status"`,不打斷輸入。
  *
  * 兩邊**刻意不同**的地方由 `variant` 決定:
- *  - `dialog`(修改密碼對話框):預設尺寸;給 `current-password / new-password / confirm-password` 這三個 name,
- *    讓密碼管理員認得(Astryx 的 TextInput 沒開放 `autoComplete`,理由見 `ChangePasswordDialog.tsx` 檔頭);
- *    打開就聚焦第一格。
+ *  - `dialog`(個人設定裡就地展開的那一份):預設尺寸;給 `current-password / new-password / confirm-password`
+ *    這三個 name,讓密碼管理員認得(Astryx 的 TextInput 沒開放 `autoComplete`,退而求其次用 `htmlName`);
+ *    展開就聚焦第一格。
  *  - `page`(強制改密碼頁):整頁的大欄位(lg);不給 name、不搶焦點。
  */
 import {useCallback, useState} from 'react';

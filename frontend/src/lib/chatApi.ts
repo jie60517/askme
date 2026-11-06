@@ -245,6 +245,11 @@ export type NoteItem = {
   mentioned: string[];
   /** 帳號名 → 顯示名稱(後端一定給,沒有 @ 到人就是空物件) */
   mentioned_names: Record<string, string>;
+  /**
+   * 看過了的人 → 什麼時候看的,照看的先後排。沒看的不在裡面。
+   * 選填:部署交接空窗裡的舊後端沒有這個欄位。
+   */
+  seen?: Record<string, string>;
   attachments?: string[];
   attachment_sid?: string | null;
   /** **只在建立當下有值**:哪些檔案沒存成 */

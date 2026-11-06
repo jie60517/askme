@@ -52,15 +52,12 @@ import {
   Building2,
   Crown,
   FolderPlus,
-  KeyRound,
   LogOut,
-  Moon,
   NotebookPen,
   Plus,
   Search,
   ShieldCheck,
   SquareTerminal,
-  Sun,
   User,
   UserCircle,
   Users as UsersIcon,
@@ -77,7 +74,7 @@ import {
   type OrderMap,
   type Reorder,
 } from './sidebar-order';
-import {ColorTag, fixedOrigin, HoverRegion, MoveMenuItem, sideNavStyles, TITLE_INPUT_LIMIT} from './sideNavParts';
+import {ColorTag, fixedOrigin, HoverRegion, MoveMenuItem, nestGuideDepth, sideNavStyles, TITLE_INPUT_LIMIT} from './sideNavParts';
 import {formatUnreadCount, isUnreadCapped} from './unread-count';
 import {easeStep, frameDelta} from '../lib/frameEase';
 import {getToken, IDENTITY_CHANGED} from '../lib/auth';
@@ -119,9 +116,9 @@ import {avatarOf, usePeopleDirectory} from '../lib/peopleDirectory';
 import {transitionMs} from '../lib/transitionMs';
 import {MOBILE_QUERY, useMediaQuery} from '../lib/media';
 import {PAGE_SWAP_CANCEL_EVENT, PAGE_SWAP_EVENT} from '../lib/pageSwap';
-import {toggleTheme, useThemeMode} from '../lib/theme';
+import {useShortcut} from '../lib/shortcuts';
 import {toastError} from '../lib/toast';
-import type {Me} from '../lib/useIdentity';
+import {hasPerm, type Me} from '../lib/useIdentity';
 import {avatarTint} from './avatar-colors';
 import {ColorPicker} from './ColorPicker';
 import {
@@ -225,12 +222,21 @@ const ADMIN_LINKS = [
    * 側邊欄照「介面一律英文」,繁體中文的例外只到那幾頁的內容為止。
    * 不要把它翻成中文。
    */
-  {href: '/stats', label: 'Usage', icon: BarChart3},
-  {href: '/security', label: 'Security', icon: ShieldCheck},
-  {href: '/users', label: 'Users', icon: UsersIcon},
+  // perm:要有哪一項權限才看得到
+  {href: '/stats', label: 'Usage', icon: BarChart3, perm: 'usage'},
+  {href: '/security', label: 'Security', icon: ShieldCheck, perm: 'security'},
+  {href: '/users', label: 'Users', icon: UsersIcon, perm: 'users'},
 ] as const;
 
 const styles = stylex.create({
+  /**
+   * Personal 底下沒有對話時那句(「No chats yet.」/「Could not load chats.」)跟子項目的字對齊。
+   *
+   * Astryx 0.7.8 起巢狀縮排是**每一列自己帶**(`padding-inline-start` = 列的基本內距 spacing-2 + 一層 spacing-6),
+   * 容器不再往右推(0.4.4 是容器推)。這句是純文字不是列,不另外縮的話會貼在最左邊、導引線(sideNavStyles.nestGuide)
+   * 穿過字中間。照子項目同一個算法縮,字就跟對話列同一條線。
+   */
+  emptyHint: {paddingInlineStart: 'calc(var(--spacing-2) + var(--spacing-6))'},
   /**
    * 帳號區的**選取底色**(見 `SelectionPill`)。長相照 Astryx 導覽列自己的選取態
    *(`navItemStyles.selected`:`--color-neutral` + `--radius-element`),所以滑完停下來跟導覽列內建的選取態一模一樣。
@@ -605,7 +611,6 @@ function readOpenFolders(): number[] {
 export function Sidebar({
   me,
   onOpenSearch,
-  onOpenChangePassword,
   onOpenSettings,
 }: {
   me: Me;
@@ -617,18 +622,17 @@ export function Sidebar({
    */
   onOpenSearch: () => void;
   /**
-   * 打開「改密碼」/「個人設定」對話框。**對話框本身不在側邊欄裡**,由外層(`App.tsx` 的 Chrome)掛。
+   * 打開「個人設定」對話框(改密碼、深淺色也在裡面)。
+   * **對話框本身不在側邊欄裡**,由外層(`App.tsx` 的 Chrome)掛。
    *
    * ⚠️ 手機版的側邊欄整個放在抽屜裡,點選單項目抽屜就關起來、裡面的東西跟著卸掉 ——
    * 對話框若寫在這裡,從手機抽屜點「Change password」對話框根本不會出現(設定也一樣)。
    * 跟 `onOpenSearch` 同一個做法:狀態放在不會被卸掉的那一層,這裡只負責叫它。
    */
-  onOpenChangePassword: () => void;
   onOpenSettings: () => void;
 }) {
   const navigate = useNavigate();
   const {pathname} = useLocation();
-  const mode = useThemeMode();
 
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   /**
@@ -1166,6 +1170,13 @@ export function Sidebar({
     // 內建的收合鈕在左下角,關掉 —— 我們自己放到標題列右邊
     hasButton: false,
   };
+
+  /*
+   * Settings → Keyboard shortcuts 的 Toggle sidebar(預設 Ctrl+Shift+S,`lib/shortcuts.ts`)。
+   * 看 `railMode` 不看 `isCollapsed`:收合到一半再按一次是展開回來(同 rail 那顆鈕,理由見它的註解)。
+   * 手機是抽屜,沒有收合這回事,不聽。
+   */
+  useShortcut('sidebar', () => collapsible.onCollapsedChange(!railMode), {isDisabled: isMobile});
 
   /**
    * rail 模式下的工具(New folder / 點資料夾)**先把側邊欄展開**再做事。
@@ -2073,9 +2084,11 @@ export function Sidebar({
                   ),
                 )
               ) : isListLoaded ? (
-                <Text type="supporting">No chats yet.</Text>
+                <Text type="supporting" xstyle={styles.emptyHint}>No chats yet.</Text>
               ) : listFailed ? (
-                <Text type="supporting" color="secondary">Could not load chats.</Text>
+                <Text type="supporting" color="secondary" xstyle={styles.emptyHint}>
+                  Could not load chats.
+                </Text>
               ) : null}
             </VStack>
             </RailFlyoutGate>
@@ -2328,9 +2341,9 @@ export function Sidebar({
               isSelected={pathname.startsWith('/ssh')}
             />
           ) : null}
-          {/* Work Flow:SSH Server 底下,跟它同一群人。部署的人沒放 workflow_actions.json 就沒有這一列
-              (`workflow_enabled`);不是工程師 / 管理員也沒有(`can_terminal`)。 */}
-          {me.workflow_enabled && me.can_terminal ? (
+          {/* Work Flow:SSH Server 底下。部署的人沒放 workflow_actions.json 就沒有這一列
+              (`workflow_enabled`);沒有 Work Flow 權限也沒有。 */}
+          {me.workflow_enabled && hasPerm(me, 'workflow') ? (
             <SideNavItem
               href="/workflow"
               label="Work Flow"
@@ -2338,8 +2351,7 @@ export function Sidebar({
               isSelected={pathname.startsWith('/workflow')}
             />
           ) : null}
-          {me.is_admin
-            ? ADMIN_LINKS.map((link) => (
+          {ADMIN_LINKS.filter((link) => hasPerm(me, link.perm)).map((link) => (
                 <SideNavItem
                   key={link.href}
                   href={link.href}
@@ -2347,8 +2359,7 @@ export function Sidebar({
                   icon={link.icon}
                   isSelected={pathname.startsWith(link.href)}
                 />
-              ))
-            : null}
+              ))}
           {/*
             ⚠️ **這裡刻意沒有小夥伴的顯示/隱藏開關。** 全站沒有任何地方呼叫
             `setPetHidden(true)`,小夥伴藏不起來,所以也不需要「叫回來」的入口。
@@ -2357,20 +2368,7 @@ export function Sidebar({
             也不需要「移回原位」的入口:釘住的小夥伴永遠看得到、也永遠拖得動
             (`usePetDrag` 的 `readPinned()` 與拖曳當下都會把座標夾進視窗內)。
           */}
-          {/* 佈景切換。放這裡是因為它跟身分同一類:「這台機器上的我怎麼看這個網站」。
-              切換會順手寫回伺服器,換一台電腦才是同一個樣子。 */}
-          <SideNavItem
-            label={mode === 'dark' ? 'Light mode' : 'Dark mode'}
-            icon={mode === 'dark' ? Sun : Moon}
-            onClick={toggleTheme}
-          />
-          {/* 改密碼緊貼在登出上面:兩個都是「這個帳號」的事,
-              而登出永遠是最後一個。 */}
-          <SideNavItem
-            label="Change password"
-            icon={KeyRound}
-            onClick={onOpenChangePassword}
-          />
+          {/* 佈景切換與改密碼都在 Settings 裡(名字那一列點下去就是 Settings),這裡不再放入口。 */}
           {/*
             ⚠️ **這裡刻意沒有「多因子驗證」。** 手機驗證碼是**管理員發放**的
             (帳號管理頁 → 產生 QR code),使用者這一側沒有任何自助入口。
@@ -2543,10 +2541,14 @@ function FolderNode({
    */
   const [menuReady, setMenuReady] = useState(false);
   const armMenu = useCallback(() => setMenuReady(true), []);
-  const inside = Object.entries(ctx.folderItems)
-    .filter(([, fid]) => fid === folder.id)
-    .map(([cid]) => ctx.byId.get(cid))
-    .filter((c): c is ConversationSummary => !!c);
+  /*
+   * ⚠️ 從 `byId` 依序取、不要從 `folderItems` 取:`folderItems` 的鍵順序是後端
+   * 歸類資料列的順序(舊的在前),`byId` 才是「新的在上面」。照 `folderItems` 的順序取的話,
+   * e-Service 新單歸進資料夾後會排在舊單下面。
+   */
+  const inside = [...ctx.byId.values()].filter(
+    (c) => ctx.folderItems[c.conversation_id] === folder.id,
+  );
   /*
    * 子資料夾與資料夾裡的對話是**兩層**,各自排序 ——
    * 併成一層的話對話可以排到子資料夾上面,而「容器排前面」是這份側邊欄
@@ -2704,6 +2706,7 @@ function FolderNode({
           <VStack
             gap={0.5}
             xstyle={sideNavStyles.nestGuide}
+            style={nestGuideDepth(depth)}
             /*
              * ⚠️ 右鍵不要往上冒泡。
              *

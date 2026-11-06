@@ -12,11 +12,12 @@
 """
 
 import re
-from typing import List, Optional, Tuple
+from datetime import datetime
+from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
-from . import models, shares, users
+from . import live, models, shares, users
 
 # @ 提及的邊界規則。_MENTION 與 strip_own_mention 共用這組常數,兩邊只要有一邊
 # 漂走,就會出現「認得出是提及、卻處理不了」這種很難查的失配。兩個容易寫錯的地方:
@@ -62,7 +63,7 @@ def parse_mentions(text: str, viewer: Optional[str] = None) -> List[str]:
 
 
 def create_note(
-    db: Session, conversation_id: str, author: str, body: str
+    db: Session, conversation_id: str, author: str, body: str, announce: bool = True
 ) -> Tuple[models.ConversationNote, List[str]]:
     """寫一則便條,把 @ 到的人拉進共用,並替每個人排一則待通知。
 
@@ -103,6 +104,12 @@ def create_note(
             )
         )
     db.commit()
+    # 開著這組對話的人立刻看到這則(e-Service、Work Flow 寫的便條也走這裡)。
+    # 沒 @ 到人的不推:路由會把它刪掉,推出去的話別人會閃過一則沒有收件人的便條。
+    # `announce=False`:呼叫端還有東西要存(網頁那條路由的附件),等存完自己推 ——
+    # 在這裡就推的話,路由一 await 存檔,別人就先看到一則還沒有附件的便條。
+    if mentioned and announce:
+        live.publish(conversation_id)
     return note, mentioned
 
 
@@ -175,6 +182,31 @@ def unread_by_conversation(db: Session, username: str) -> dict:
     return {conv_id: count for conv_id, count in rows}
 
 
+def seen_by_note(db: Session, conversation_id: str) -> Dict[int, Dict[str, datetime]]:
+    """note_id → {看過的人: 什麼時候看的},照看的先後排。便條上那排小頭像靠它。
+
+    一次撈完整組對話,不要逐則查 —— 一組對話幾十則便條就是幾十次查詢。
+    `remove_for_user` 刪掉的(離開共用的人)自然不在裡面:他看不到這組對話了,不算數。
+    """
+    rows = (
+        db.query(
+            models.ConversationMention.note_id,
+            models.ConversationMention.username,
+            models.ConversationMention.seen_at,
+        )
+        .filter(
+            models.ConversationMention.conversation_id == conversation_id,
+            models.ConversationMention.seen_at.isnot(None),
+        )
+        .order_by(models.ConversationMention.seen_at.asc())
+        .all()
+    )
+    out: Dict[int, Dict[str, datetime]] = {}
+    for note_id, username, seen_at in rows:
+        out.setdefault(note_id, {})[username] = seen_at
+    return out
+
+
 def mark_read(db: Session, username: str, conversation_id: str) -> int:
     """把這組對話裡屬於他的提及全部標成已讀,回傳標了幾則。
 
@@ -205,11 +237,14 @@ def remove_for_user(db: Session, conversation_id: str, username: str) -> None:
     自己 commit(跟 remove_all 一致)—— 呼叫點都排在 shares.remove 後面,
     而那個函式已經 commit 過了,留給呼叫端的話這筆刪除會隨著 session 關閉被丟掉。
     """
-    db.query(models.ConversationMention).filter(
+    deleted = db.query(models.ConversationMention).filter(
         models.ConversationMention.conversation_id == conversation_id,
         models.ConversationMention.username == username,
     ).delete(synchronize_session=False)
     db.commit()
+    # 他看過的那幾則的頭像要跟著消失(已讀是所有人都看得到的)
+    if deleted:
+        live.publish(conversation_id)
 
 
 def remove_all(db: Session, conversation_id: str) -> None:

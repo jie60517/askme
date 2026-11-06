@@ -1,5 +1,6 @@
 /**
- * 個人設定裡 Companion 那列底下的那一塊。
+ * 個人設定 Companion 那一區卡片裡的列:Companion(右邊的 Classic / Bloub 由呼叫端給)+ 預覽台、
+ * Bloub 才有的 Shape / Color(共用 `settingsRows.tsx` 的卡片列)。
  *
  * - **預覽台兩隻都有**:Classic 是 GIF、Bloub 是 bloub。切換時交叉淡入淡出 ——
  *   要退場的那隻立刻淡出,要進場的晚 80ms 才落定,新舊不會疊在一起。
@@ -19,13 +20,15 @@
  * 靜態 import 的話引擎會被打進主程式。右下角那隻開頁就會載入同一份引擎,
  * 所以打開設定時這塊通常已經在快取裡。
  */
-import {useEffect, useRef, useState} from 'react';
+import {useEffect, useRef, useState, type ReactNode} from 'react';
 
 import {Center} from '@astryxdesign/core/Center';
+import {Card} from '@astryxdesign/core/Card';
+import {Divider} from '@astryxdesign/core/Divider';
 import {Stack, VStack} from '@astryxdesign/core/Layout';
-import {Text} from '@astryxdesign/core/Text';
 import {ToggleButton, ToggleButtonGroup} from '@astryxdesign/core/ToggleButton';
 import * as stylex from '@stylexjs/stylex';
+import {Palette, Shapes, Smile} from 'lucide-react';
 
 import {
   BLOB_COLOR_LABELS,
@@ -52,6 +55,7 @@ import {closedPath} from '../pet/bloub/shape';
 import {COLOR_BY_ID, SHAPE_BY_ID, type ShapeId} from '../pet/bloub/skins';
 import {PET_SPRITES} from '../pet/pet-sprites';
 import {BlobPalette} from './BlobPalette';
+import {SettingsRow} from './settingsRows';
 
 /** 換了之後開心多久 */
 const CHEER_MS = 900;
@@ -71,7 +75,6 @@ const styles = stylex.create({
   stage: {
     position: 'relative',
     height: 144,
-    marginBlockStart: 'var(--spacing-4)',
   },
   layer: {position: 'absolute', inset: 0},
   gif: {width: 144, height: 144, objectFit: 'contain'},
@@ -93,10 +96,13 @@ const styles = stylex.create({
   },
   /** `overflow: hidden` 掛在裡面這層,grid 自己要量得到內容的完整高度(同 actionsClip) */
   clip: {overflow: 'hidden', minHeight: 0},
-  /** 間距在 clip 裡面,收起來時跟著被夾掉(同 modelInner 的理由) */
-  inner: {paddingBlockStart: 'var(--spacing-4)'},
-  /** 調色盤跟 Color 那排的距離 = 型態 / 顏色兩列之間的距離(`VStack gap={3}`);放在 clip 裡,理由同上 */
-  paletteInner: {paddingBlockStart: 'var(--spacing-3)'},
+  /**
+   * 調色盤:左右與底下跟列同一個內距(settingsRows 的 ROW_PADDING = spacing 4),貼著 Color 那一列。
+   * 放在 clip 裡面,收起來時跟著被夾掉。
+   */
+  paletteInner: {paddingInline: 'var(--spacing-4)', paddingBlockEnd: 'var(--spacing-4)'},
+  /** 手機寬一排放不下時換行(不換行會把最後兩顆裁掉) */
+  wrap: {flexWrap: 'wrap'},
   /* ── 淡入 + 輕微回彈:跟 AccountSettingsDialog.actionsFade 同一套 ── */
   fade: {
     opacity: 0,
@@ -205,7 +211,20 @@ function useIdleColorSave() {
   return api;
 }
 
-export default function CompanionLook({companion, isDisabled}: {companion: Companion; isDisabled?: boolean}) {
+/**
+ * 回傳的是**卡片裡的列**(Companion、Shape、Color),卡片本身由呼叫端包(`AccountSettingsDialog` 的 Companion 那一區)。
+ * `picker` 是 Companion 那一列右邊的 Classic / Bloub —— 不放在這個檔案,因為這個檔案是 lazy 的,
+ * 呼叫端在它載入前要先畫得出那一列。
+ */
+export default function CompanionLook({
+  companion,
+  isDisabled,
+  picker,
+}: {
+  companion: Companion;
+  isDisabled?: boolean;
+  picker?: ReactNode;
+}) {
   const isBlob = companion === 'blob';
   const shape = useBlobShape();
   const color = useBlobColor();
@@ -270,47 +289,70 @@ export default function CompanionLook({companion, isDisabled}: {companion: Compa
   const showPalette = isCustom && paletteOpen;
 
   return (
-    <VStack gap={0}>
-      <Stack xstyle={styles.stage} aria-hidden>
-        <Center xstyle={[styles.layer, styles.fade, !isBlob && styles.fadeShown, isBlob && styles.hidden]}>
-          <img src={PET_SPRITES.walking.src ?? undefined} alt="" draggable={false} {...stylex.props(styles.gif)} />
-        </Center>
-        <Center xstyle={[styles.layer, styles.fade, isBlob && styles.fadeShown, !isBlob && styles.hidden]}>
-          <BloubAvatar
-            step={cheer ? CHEER : REST}
-            size={BLOB_SIZE_PX}
-            follow
-            baseShape={shape}
-            color={color === 'auto' ? null : color}
-          />
-        </Center>
-      </Stack>
-      {/* ⚠️ 收起來時要 `inert`:按鈕還在 DOM 裡(要演完收合),不擋的話 Tab 會進到看不見的地方 */}
+    <>
+      {/* 預覽台:範本「選擇器 + 預覽」的做法 —— 灰卡片裡一張白卡,看起來是另一個畫面 */}
+      <SettingsRow
+        title="Companion"
+        icon={Smile}
+        control={picker}
+        detail={
+          <Card padding={3} width="100%">
+            <Stack xstyle={styles.stage} aria-hidden>
+              <Center xstyle={[styles.layer, styles.fade, !isBlob && styles.fadeShown, isBlob && styles.hidden]}>
+                <img src={PET_SPRITES.walking.src ?? undefined} alt="" draggable={false} {...stylex.props(styles.gif)} />
+              </Center>
+              <Center xstyle={[styles.layer, styles.fade, isBlob && styles.fadeShown, !isBlob && styles.hidden]}>
+                <BloubAvatar
+                  step={cheer ? CHEER : REST}
+                  size={BLOB_SIZE_PX}
+                  follow
+                  baseShape={shape}
+                  color={color === 'auto' ? null : color}
+                />
+              </Center>
+            </Stack>
+          </Card>
+        }
+      />
+      {/*
+        型態 / 顏色兩列:只有 Bloub 才長出來(殼與淡入見 styles.panel / fade)。
+        ⚠️ 兩列上面那條淡線放在殼**裡面**,收起來時一起被夾掉 —— 放在外面的話 Classic 時卡片底下多一條線。
+        ⚠️ 收起來時要 `inert`:按鈕還在 DOM 裡(要演完收合),不擋的話 Tab 會進到看不見的地方
+      */}
       <Stack xstyle={[styles.panel, isBlob && styles.panelOpen]}>
         <Stack xstyle={styles.clip} inert={!isBlob}>
-          <VStack gap={3} xstyle={[styles.inner, styles.fade, isBlob && styles.fadeShown]}>
-            {/* label 對報讀隱藏:群組自己帶著 `label`,不藏會被念兩次(同 Companion 那列) */}
-            <VStack gap={1}>
-              <Text type="label" aria-hidden>
-                Shape
-              </Text>
-              <ToggleButtonGroup label="Shape" size="sm" value={shape} onChange={chooseShape} isDisabled={isDisabled}>
-                {BLOB_SHAPES.map((s) => (
-                  <ToggleButton key={s} value={s} label={BLOB_SHAPE_LABELS[s]} icon={<ShapeIcon id={s} />} isIconOnly />
-                ))}
-              </ToggleButtonGroup>
-            </VStack>
-            <VStack gap={0}>
-              <VStack gap={1}>
-                <Text type="label" aria-hidden>
-                  Color
-                </Text>
+          <VStack gap={0} xstyle={[styles.fade, isBlob && styles.fadeShown]}>
+            <Divider variant="subtle" />
+            <SettingsRow
+              title="Shape"
+              icon={Shapes}
+              control={
+                <ToggleButtonGroup
+                  label="Shape"
+                  size="sm"
+                  value={shape}
+                  onChange={chooseShape}
+                  isDisabled={isDisabled}
+                  xstyle={styles.wrap}
+                >
+                  {BLOB_SHAPES.map((s) => (
+                    <ToggleButton key={s} value={s} label={BLOB_SHAPE_LABELS[s]} icon={<ShapeIcon id={s} />} isIconOnly />
+                  ))}
+                </ToggleButtonGroup>
+              }
+            />
+            <Divider variant="subtle" />
+            <SettingsRow
+              title="Color"
+              icon={Palette}
+              control={
                 <ToggleButtonGroup
                   label="Color"
                   size="sm"
                   value={isCustom ? CUSTOM : color}
                   onChange={chooseColor}
                   isDisabled={isDisabled}
+                  xstyle={styles.wrap}
                 >
                   {[
                     ...BLOB_COLORS.map((c) => (
@@ -325,25 +367,24 @@ export default function CompanionLook({companion, isDisabled}: {companion: Compa
                     />,
                   ]}
                 </ToggleButtonGroup>
-              </VStack>
-              {/* 調色盤:往下長出來,殼與淡入跟上面那塊同一套。間距放在 clip 裡面(`paletteInner`),
-                  收起來時跟著被夾掉 —— 放在外層 VStack 的 gap 的話,收起來 Color 底下還是多一段空白 */}
-              <Stack xstyle={[styles.panel, showPalette && styles.panelOpen]}>
-                <Stack xstyle={styles.clip} inert={!showPalette}>
-                  <Stack xstyle={[styles.paletteInner, styles.fade, showPalette && styles.fadeShown]}>
-                    <BlobPalette
-                      value={isCustom ? color : lastCustom}
-                      onPreview={previewCustom}
-                      onPick={pickCustom}
-                      isDisabled={isDisabled}
-                    />
-                  </Stack>
+              }
+            />
+            {/* 調色盤:貼著 Color 那一列往下長出來,殼與淡入跟上面那塊同一套 */}
+            <Stack xstyle={[styles.panel, showPalette && styles.panelOpen]}>
+              <Stack xstyle={styles.clip} inert={!showPalette}>
+                <Stack xstyle={[styles.paletteInner, styles.fade, showPalette && styles.fadeShown]}>
+                  <BlobPalette
+                    value={isCustom ? color : lastCustom}
+                    onPreview={previewCustom}
+                    onPick={pickCustom}
+                    isDisabled={isDisabled}
+                  />
                 </Stack>
               </Stack>
-            </VStack>
+            </Stack>
           </VStack>
         </Stack>
       </Stack>
-    </VStack>
+    </>
   );
 }

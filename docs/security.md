@@ -314,11 +314,11 @@ with engine.connect() as c:
 
 ## 安全頁
 
-`/security`(管理員)。「最近的事件」**只顯示登入這一類**:成功、失敗,以及「密碼沒問題卻沒進來」
+`/security`(有 Security 權限的人與管理員)。「最近的事件」**只顯示登入這一類**:成功、失敗,以及「密碼沒問題卻沒進來」
 的幾種(被鎖、被地區擋、驗證碼錯、沒綁驗證器)—— 見 `routers/audit.py` 的 `SHOWN`。
-其他事件(帳號、職稱、終端機、Work Flow、白名單增刪、境外白名單放行、公司 IP 免驗證碼、地區封鎖試跑)
+其他事件(帳號、角色與權限、終端機、Work Flow、白名單增刪、境外白名單放行、公司 IP 免驗證碼、地區封鎖試跑)
 **後端照記、畫面不顯示**,事後查「誰刪了帳號、誰改了權限」用 `GET /api/audit?all_events=1`
-(管理員,照 `_CATEGORIES` 分類)或直接查資料庫的 `audit_log`。
+(要 Security 權限,照 `_CATEGORIES` 分類)或直接查資料庫的 `audit_log`。
 `login_mfa_challenged`(密碼對了、還沒過第二關的中間狀態)連 `all_events` 也預設不列,
 要看帶 `?include_challenges=1`。
 

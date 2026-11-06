@@ -44,6 +44,8 @@ services:
       CLAUDE_AUTH: ${CLAUDE_AUTH:-subscription}
       # 不送遙測、不檢查更新這類非必要連線
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+      # 所有帳號共用同一個 ~/.claude,自動記憶等於跨帳號共用的檔(backend 的 agent._child_env 也會強制帶)
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1"
 
     volumes:
       # claude 的訂閱登入、session 與使用者層設定。升級 image 不用重登就靠它

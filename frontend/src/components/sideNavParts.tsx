@@ -65,10 +65,12 @@ export const sideNavStyles = stylex.create({
    * 展開之後從圖示往下的那條灰線(設計系統 shell nav 的巢狀導引線,
    * 跟 TreeList 的 `lineGuides` 同一個處理)。
    *
-   * 位置要對準**上一層那顆圖示的中心**:那一列的內距是 --spacing-2、
-   * 圖示 16px(半寬也是 --spacing-2),所以圖示中心在列的左緣 +16px;
-   * 而子項目已經被 SideNavItem 往內推了 --spacing-6(24px)。
-   * 兩者相減 = -8px,線就落在圖示正下方。
+   * 位置要對準**上一層那顆圖示的中心**:那一列的內距是 --spacing-2 + 深度 × --spacing-6、
+   * 圖示 16px(半寬也是 --spacing-2),所以圖示中心在列的左緣 +16px + 深度 × 24px。
+   * Astryx 0.7 起巢狀的容器不再一層層往內推(縮排改成畫在每一列自己的內距裡,
+   * 見 global.css「巢狀列的縮排」),每一層的左緣都是整欄的左緣,
+   * 所以深度要自己帶進來:`style={nestGuideDepth(上一列的深度)}`,最上層那一列是 0(不帶也是 0)。
+   * (0.4 時代容器每層往內推 --spacing-6,這裡寫死 16 - 24 = -8px 就每層都對。)
    *
    * 收合時它一樣在,但外層那個 `overflow: hidden` 的格子高度是 0,
    * 所以看不到 —— 不必另外判斷開合。
@@ -79,7 +81,7 @@ export const sideNavStyles = stylex.create({
       content: '""',
       position: 'absolute',
       insetInlineStart:
-        'calc(var(--spacing-2) + var(--spacing-2) - var(--spacing-6))',
+        'calc(var(--spacing-2) + var(--spacing-2) + var(--nest-guide-depth, 0) * var(--spacing-6))',
       insetBlockStart: 0,
       insetBlockEnd: 0,
       width: 'var(--border-width)',
@@ -419,6 +421,14 @@ const colorTagStyles = stylex.create({
  * 尺寸跟 StatusDot 對齊(--spacing-2 = 8px),排在一起才不會一大一小。
  * `color` 是 CSS 顏色值(`sidebar-colors.ts` 的 `colorValue(key)`)。
  */
+/**
+ * `sideNavStyles.nestGuide` 那條線要往內推幾層:給**擁有這組子項目的那一列**的深度(最上層的列 = 0)。
+ * 掛在同一個容器的 `style` 上,跟 `ColorTag` 的 `--item-color` 同一種寫法。
+ */
+export function nestGuideDepth(depth: number): React.CSSProperties {
+  return {'--nest-guide-depth': depth} as React.CSSProperties;
+}
+
 export function ColorTag({color}: {color: string}) {
   return <Stack aria-hidden xstyle={colorTagStyles.tag} style={{'--item-color': color} as React.CSSProperties} />;
 }

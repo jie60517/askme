@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import random
 import re
 import shutil
 import time
@@ -31,6 +32,9 @@ def _child_env() -> dict:
     env = dict(os.environ)
     for key in config.SECRET_ENV_KEYS:
         env.pop(key, None)
+    # 所有人的 claude 共用同一個 HOME,自動記憶等於一個跨帳號的共用檔:A 寫進去的東西
+    # 之後每個人的對話都會載入,而 CLI 寫記憶檔不受 --allowedTools 管。
+    env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "1"
     return env
 
 def collect_stderr(stream: asyncio.StreamReader) -> "tuple[List[bytes], asyncio.Task]":
@@ -188,6 +192,33 @@ def sanitize_text(text: Optional[str], max_chars: int) -> str:
     return cleaned
 
 
+#: 開頭是 `/` 而且不是工具箱指令時,接在最前面的固定字樣(見 inert_for_cli)。
+QUESTION_LEAD = "使用者的問題:\n"
+
+# CLI 2.1.290 執行檔裡每一條 `@` 引用的比對式都是 `(^|[\s。、？！])@`。
+# 那是 JS 的 `\s`,比 Python 的多一個 ﻿ —— 不補的話 `﻿@/etc/passwd` 會漏掉
+_CLI_MENTION = re.compile(r"(^|[\s﻿。、？！])@")
+_CLI_SLASH = re.compile(r"[\s﻿]*/(\S*)")
+
+
+def inert_for_cli(text: str, slash_commands: Iterable[str] = ()) -> str:
+    """讓使用者寫的文字不會觸發 CLI 的提示端功能。
+
+    CLI 收到提示時會先把 `@路徑` 展開成那個檔案的內容(或資料夾清單),這一步在任何工具呼叫
+    之前、不經過 --allowedTools 的路徑規則 —— 唯讀帳號打 `@` 加上範圍外的路徑就讀得到。
+
+    CLI(2.1.290)只認「詞首」的 `@`:行首、空白後面,或接在 `。、？！` 後面。只換這幾種,
+    `表名@dblink`、email 這類寫在詞中間的維持原樣(換掉的話模型會拿全形去 grep,什麼都找不到)。
+
+    開頭的 `/` 會被 CLI 當斜線指令跑:`slash_commands` 裡的名字照舊放行,其他的前面加 QUESTION_LEAD。
+    """
+    text = _CLI_MENTION.sub(r"\1＠", text)
+    m = _CLI_SLASH.match(text)
+    if m and m.group(1) not in set(slash_commands):
+        text = QUESTION_LEAD + text
+    return text
+
+
 def is_valid_session_id(value: Optional[str]) -> bool:
     return bool(value) and bool(_UUID_RE.match(value))
 
@@ -213,7 +244,8 @@ def build_context_note(knowledge_base: Optional[dict] = None) -> str:
     從答案表面看不出來。所以明確要求不要讀這幾個路徑以外的原始碼。
     """
     base = knowledge_base or config.get_knowledge_base(None)
-    if not base:
+    # 一般模式:不看專案,一個字都不講
+    if not base or config.is_general(base):
         return ""
 
     notes = [f"這個問題是關於「{base['label']}」這個專案。"]
@@ -291,11 +323,14 @@ def build_prompt(
         f"① Excel:直接寫 .csv(第一列放欄位標題),系統會自動轉成同名 .xlsx;"
         f"② Word:先寫好 .md,再寫一份 {docgen.MANIFEST_NAME},一行一個要轉的 .md 檔名;"
         f"③ PDF:先寫好 .md,再寫一份 {pdfgen.MANIFEST_NAME},一行一個要轉的 .md 檔名"
-        f"(同一份 .md 可以同時列在兩份清單裡,Word 與 PDF 都會產);"
+        f"(同一份 .md 可以同時列在兩份清單裡,Word 與 PDF 都會產;"
+        f"轉好之後 .md 原稿不會列給使用者,所以不要在回覆裡叫他下載 .md)。"
         f"④ 簡報:寫 {slidegen.MANIFEST_NAME},格式是 {slidegen.PROMPT_SHAPE};"
         f"⑤ 多個檔案打包:寫 {zipgen.MANIFEST_NAME},第一行是壓縮檔名,"
         f"其餘一行一個這個資料夾裡的檔名。這幾份清單檔本身不會出現在下載清單裡。"
-        f"所有檔案都要**直接寫在 {out_dir}/ 這一層,不要建子資料夾**。)"
+        f"所有檔案都要**直接寫在 {out_dir}/ 這一層,不要建子資料夾**。"
+        f"使用者要一份文件(說明、報告、手冊、規格…)但沒講格式時,**交 Word**(走 ②);"
+        f"只有他明講要 Markdown / md / 純文字,才直接交 .md。)"
     )
     # 檔案裡的資料是使用者拿去對帳、開會用的,掰出來的一列比少一列嚴重得多。
     # 而「列不完就默默少列幾筆」是模型在這種題目上最常見的失誤。
@@ -308,14 +343,17 @@ def build_prompt(
     # 一支大型原始碼動輒好幾萬行、好幾 MB,模型根本吐不完,
     # 就算吐得完也可能漏行或改字 —— 使用者拿到的就不是原始檔了。
     # 所以改成讓它寫一份「清單」,真正的複製由後端做(見 apply_copy_manifest)。
-    parts.append(
-        f"(如果使用者要的是主機上**已經存在**的檔案(例如某支原始碼),"
-        f"**絕對不要**用 Write 把檔案內容重打一遍 —— 大檔案一定會失敗,而且重打出來的"
-        f"內容不保證跟原始檔一模一樣。正確做法是用 Write 建立一份清單檔 "
-        f"{out_dir}/{COPY_MANIFEST_NAME},一行一個要交付的檔案絕對路徑(不要有其他內容),"
-        f"系統會自動把那些檔案原封不動複製進下載資料夾。清單本身不會出現在下載清單裡。)"
-    )
-    return " ".join(parts)
+    # 一般模式不講這段:複製只肯從這個專案的程式碼樹拿(apply_copy_manifest),一般模式沒有那棵樹
+    if not config.is_general(knowledge_base):
+        parts.append(
+            f"(如果使用者要的是主機上**已經存在**的檔案(例如某支原始碼),"
+            f"**絕對不要**用 Write 把檔案內容重打一遍 —— 大檔案一定會失敗,而且重打出來的"
+            f"內容不保證跟原始檔一模一樣。正確做法是用 Write 建立一份清單檔 "
+            f"{out_dir}/{COPY_MANIFEST_NAME},一行一個要交付的檔案絕對路徑(不要有其他內容),"
+            f"系統會自動把那些檔案原封不動複製進下載資料夾。清單本身不會出現在下載清單裡。)"
+        )
+    # 整段一起處理:問題、上傳檔名(檔名可以有空白和 @)都在裡面
+    return inert_for_cli(" ".join(parts))
 
 
 # 每個工具的「我到底碰了什麼」放在 input 的哪個欄位。
@@ -564,6 +602,83 @@ def scope_readonly_tools(
     return ",".join(scoped)
 
 
+#: 登入憑證剛好過期、好幾題同時要換新憑證時,claude 互相卡住的那句錯誤
+_AUTH_REFRESH_RACE = "Failed to refresh OAuth token"
+
+
+def _is_auth_refresh_race(event: dict) -> bool:
+    if event["type"] == "done":
+        return not event.get("success") and _AUTH_REFRESH_RACE in (event.get("error") or "")
+    return event["type"] == "error" and _AUTH_REFRESH_RACE in (event.get("message") or "")
+
+
+def _session_files(session_id: str) -> List[Path]:
+    """這個 claude session 的逐字稿(`~/.claude/projects/<目錄代號>/<session id>.jsonl`)。
+
+    用 glob 找而不是自己組目錄代號:代號是 claude 從 cwd 換算的,自己算一份哪天規則變了就對不上;
+    session id 是 UUID,不會撞到別人的檔。
+    """
+    root = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "projects"
+    return list(root.glob(f"*/{session_id}.jsonl"))
+
+
+async def stream_agent_retrying(**kwargs) -> AsyncIterator[dict]:
+    """同 `stream_agent`,只多一件事:撞到「好幾題同時換新登入憑證」就等幾秒重跑一次。
+
+    憑證過期之後同時送出的幾題,claude 會各自去換新憑證、互相卡住,還沒產生任何內容就整題失敗
+    (實測:放一晚之後三題同時問,三題全倒;單獨重問就好了)。給同事共用時,
+    早上第一批同時問的人就會一起撞到,所以在這裡吞掉那一次。
+
+    開始做事(有文字或讀檔)之前的事件先壓著不送,失敗的那一次才不會在畫面上留下痕跡;
+    排隊與心跳照常即時送。只重跑一次:第二次還是失敗就照實回報。
+
+    ⚠️ **重跑前要把逐字稿還原。** claude 在呼叫 API 之前就把這一題寫進 session 檔了
+    (容器實測:第一次失敗後同一個 --session-id 再跑 →「Session ID … is already in use」)。
+    所以第一次啟動前先記下逐字稿原本的長度:新對話(本來沒有檔)就刪掉,
+    續問就截回原本的長度 —— 不然新對話重跑必定失敗,續問則會留下兩次同樣的提問。
+    """
+    session_id = kwargs.get("claude_session_id") or ""
+    before = {p: p.stat().st_size for p in _session_files(session_id)} if session_id else {}
+
+    gen = stream_agent(**kwargs)
+    held: Optional[List[dict]] = []
+    retry = False
+    try:
+        async for event in gen:
+            if held is None or event["type"] in ("queued", "ping"):
+                yield event
+                continue
+            if _is_auth_refresh_race(event):
+                retry = True
+                break
+            held.append(event)
+            if event["type"] in ("delta", "source"):
+                yield_now, held = held, None
+                for e in yield_now:
+                    yield e
+    finally:
+        # 外層被關掉(按停止、連線斷)時也要把內層收掉,claude 子行程才會跟著結束
+        await gen.aclose()
+    if not retry:
+        for e in held or []:
+            yield e
+        return
+
+    for path in _session_files(session_id) if session_id else []:
+        try:
+            if path in before:
+                with open(path, "r+b") as f:
+                    f.truncate(before[path])
+            else:
+                path.unlink()
+        except OSError:
+            logger.warning("重跑前還原逐字稿失敗:%s", path, exc_info=True)
+    logger.warning("claude 換新登入憑證時跟其他題撞在一起,等幾秒重跑一次")
+    await asyncio.sleep(random.uniform(3, 8))
+    async for event in stream_agent(**kwargs):
+        yield event
+
+
 async def stream_agent(
     question: str,
     session_id: str,
@@ -650,7 +765,7 @@ async def stream_agent(
     #
     # ⚠️ 這行要**排在組 `--allowedTools` 之前** —— cwd 同時是唯讀帳號讀取範圍的
     # 第一個目錄(見下面 readable_dirs)。
-    cwd = config.resolve_workdir(knowledge_base, workdir)
+    cwd = config.resolve_workdir(knowledge_base, workdir, user=asker)
 
     # --add-dir 掛哪些目錄。只掛這一題選到的專案,不要把所有專案都掛上去 ——
     # 掛了就等於允許它跨專案亂翻。(真正接到指令列的位置在最下面,那個參數是
@@ -667,6 +782,10 @@ async def stream_agent(
     # 依登入身分決定,由呼叫端(ask.py)算好傳進來 —— 不能讓請求自己指定要寫哪。
     if writable_extra_dirs:
         extra_dirs += writable_extra_dirs
+    # 一般模式:全站額外目錄(CLAUDE_EXTRA_DIRS,ERP 的樹)與 flows/ 這類
+    # 專案知識的可寫目錄都不掛 —— 「不看專案」就是一個都不掛。工具本身照角色(有 Bash 的人照樣讀得到)。
+    if config.is_general(knowledge_base):
+        extra_dirs = []
     seen_dirs = list(dict.fromkeys(d for d in extra_dirs if d))
 
     # 唯讀帳號讀得到的範圍。理由寫在 scope_readonly_tools 上面。
@@ -1234,7 +1353,13 @@ def flatten_output_dir(
 
 
 def list_output_files(session_id: str) -> List[str]:
+    """這一題給使用者的檔案。
+
+    不列的:轉成 Word / PDF 成功的 .md 原稿(`outputs_common.hidden_sources`,
+    檔案還在磁碟上,AI 續問讀得到)與記它們的那份 `__sources__.txt`。
+    """
     out_dir = config.OUTPUT_DIR / session_id
     if not out_dir.exists():
         return []
-    return sorted(p.name for p in out_dir.iterdir() if p.is_file())
+    hidden = outputs_common.hidden_sources(out_dir) | {outputs_common.SOURCES_NAME}
+    return sorted(p.name for p in out_dir.iterdir() if p.is_file() and p.name not in hidden)

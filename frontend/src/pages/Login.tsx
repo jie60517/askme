@@ -73,7 +73,7 @@ const SPLIT_QUERY = '@container login-split (max-width: 511px)';
 
 /*
  * 手機鍵盤的提示屬性:不然 iOS 會把帳號第一個字自動大寫、驗證碼跳出全鍵盤。
- * 為什麼要用展開傳進 `TextInput`,見 `lib/nativeInputHints.ts`。
+ * 都是 TextInput 0.7 的正式屬性,用展開只是讓三格共用同一份(見 `lib/nativeInputHints.ts`)。
  */
 
 /** 帳號:不准自動大寫 / 自動校正 / 拼字紅線(帳號不是英文單字) */
@@ -443,9 +443,7 @@ export default function Login() {
                                 status={error ? {type: 'error'} : undefined}
                                 onKeyDown={onEnterVerify}
                                 /*
-                                  數字鍵盤靠 `inputMode="numeric"`(在 CODE_HINTS 裡)——
-                                  設計系統的 TextInput 只在**型別上**沒開放它,執行期會攤到
-                                  `<input>`,見 `lib/nativeInputHints.ts` 的說明。
+                                  數字鍵盤靠 `inputMode="numeric"`(在 CODE_HINTS 裡,TextInput 0.7 的正式屬性)——
                                   **不要改成 `type="number"`** 去湊 ——
                                   那會把開頭的 0 吃掉(`012345` 變成 `12345`),
                                   而六位數的碼有十分之一機會是 0 開頭。

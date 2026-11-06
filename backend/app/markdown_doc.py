@@ -215,6 +215,8 @@ def apply_manifest(
     `label` 是訊息裡的格式名(「Word」「PDF」),`package` 是 `render` 要的函式庫
     (沒裝時講出要裝什麼)。`render(markdown, out_path, title=...)` 回傳訊息、失敗丟例外。
 
+    轉成功的 .md 記成原稿(`outputs_common.mark_source`),下載清單不再列它。
+
     任何一步失敗都只回訊息、不丟例外:這是收尾階段,答案已經算完了,
     不該因為產檔失敗把整題變成失敗。
     """
@@ -253,5 +255,8 @@ def apply_manifest(
                 % (name, label, type(exc).__name__, exc)
             )
             outputs_common.discard_partial(dst)
+            outputs_common.mark_source(session_dir, name, converted=False)
+        else:
+            outputs_common.mark_source(session_dir, name, converted=True)
 
     return notices

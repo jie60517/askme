@@ -5,7 +5,7 @@ from typing import List, Optional, Tuple
 from fastapi import UploadFile
 
 from . import config
-from .extract import extract_text
+from .extract import extract_images, extract_text
 
 #: 上傳目錄名 = 呼叫端產的 uuid4().hex。它會變成路徑的一段,所以在寫檔前驗格式。
 _SESSION_ID = re.compile(r"[0-9a-f]{32}")
@@ -138,6 +138,10 @@ def save_upload(session_id: str, file: UploadFile) -> Tuple[Optional[str], Optio
         return None, f"主機寫入失敗({exc.strerror or type(exc).__name__})"
 
     text = extract_text(target_path)
+    if text is not None:
+        # 簡報 / Word 裡的圖另存成檔,文字檔後面寫明路徑 —— 只給文字的話,截圖上的內容 claude 完全看不到。
+        # 只有圖、沒有字的文件 text 是空字串,圖照樣要存
+        text = "\n".join(part for part in [text, *extract_images(target_path, target_dir)] if part)
     if text:
         try:
             (target_dir / f"{name}.txt").write_text(text, encoding="utf-8")

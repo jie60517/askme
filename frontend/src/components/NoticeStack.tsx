@@ -40,7 +40,7 @@ const styles = stylex.create({
     insetInlineEnd: 0,
     margin: 0,
     padding: 'var(--spacing-4)',
-    border: 'none',
+    borderStyle: 'none',
     backgroundColor: 'transparent',
     overflow: 'visible',
     // 寫死寬度:設計系統沒有「一張卡多寬」的 token。比附件卡(236,擠在輸入框右邊)寬,因為這裡的句子比較長

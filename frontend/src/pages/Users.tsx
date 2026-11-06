@@ -1,22 +1,23 @@
 /**
  * 帳號管理(管理員)。
  *
- * 版面照設計系統的 **table-grouped** 範本(`npx @astryxdesign/cli template table-grouped`):
- * 一條工具列(搜尋 + 分組)+ 一張
+ * 版面照 **table-grouped** 那份範本的形(設計系統的
+ * `npx @astryxdesign/cli template table-grouped`):一條工具列(搜尋 + 分組)+ 一張
  * **可收合分組**的表。範本裡那段自己拼 `TableRow colSpan` 的分組標頭沒有照抄
  * —— 設計系統已經有 `useTableGroupedRows`(同一份範本的正式版做法),
  * 它自己會畫「▸ 分組名 (筆數)」那一列、自己管收合,收合狀態由這裡持有。
  * 範本的右側詳情面板也沒有做:這一頁的每一列只有五個欄位,全部都在表上
  * 看得到,開一個面板只是把同樣的東西再抄一次。
  *
- * 分組維度給三個(職務 / 狀態 / 不分組),預設不分組(見 `groupBy`)。
- * 「依職務」那組要留意的是完整權限的人(他們可以在主機上跑指令)。
+ * 分組維度給三個(權限 / 狀態 / 不分組),預設**權限** —— 這一頁最常被打開的
+ * 理由就是「誰有完整權限」(那組人可以在主機上跑指令)。
  *
- * ⚠️ 危險動作(刪除)走確認 Dialog。
+ * ⚠️ 危險動作(刪除)紅字而且走確認 Dialog。
  * ⚠️ **這一頁的內容是繁體中文**,但**側邊欄那條連結是英文**(見 `Sidebar.tsx`)。
  * 後端回的 detail 照原樣顯示(它是中文的)。
  */
-import {useCallback, useId, useMemo, useState, type ReactNode} from 'react';
+import {useCallback, useId, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction} from 'react';
+import * as stylex from '@stylexjs/stylex';
 
 import {Token} from '@astryxdesign/core/Token';
 import {Button} from '@astryxdesign/core/Button';
@@ -27,18 +28,24 @@ import {HStack, Layout, LayoutContent, LayoutFooter, Stack, StackItem, VStack} f
 import {MoreMenu} from '@astryxdesign/core/MoreMenu';
 import {SegmentedControl, SegmentedControlItem} from '@astryxdesign/core/SegmentedControl';
 import {Selector} from '@astryxdesign/core/Selector';
+import {Tooltip} from '@astryxdesign/core/Tooltip';
 import {StatusDot} from '@astryxdesign/core/StatusDot';
 import {
   Table,
   pixel,
   proportional,
   useTableGroupedRows,
+  useTableSelection,
+  useTableSelectionState,
   type TableColumn,
+  type TablePlugin,
 } from '@astryxdesign/core/Table';
 import {Text} from '@astryxdesign/core/Text';
 import {Icon} from '@astryxdesign/core/Icon';
 import {TextInput} from '@astryxdesign/core/TextInput';
-import {Search, UserPlus} from 'lucide-react';
+import {Link} from '@astryxdesign/core/Link';
+import {Tab, TabList} from '@astryxdesign/core/TabList';
+import {Plus, Search, UserPlus} from 'lucide-react';
 
 import {AdminPage} from '../components/AdminPage';
 import {FieldWithMessage} from '../components/FieldMessage';
@@ -46,20 +53,25 @@ import {IssueMfaDialog} from '../components/IssueMfaDialog';
 import {TableCard} from '../components/TableCard';
 import {useTableKit} from '../components/tableKit';
 import {AsyncSection} from '../components/AsyncSection';
+import {PermList, describeOwn} from '../components/PermList';
 import {
-  CONSULTANT_ROLE,
-  DEFAULT_USER_ROLE,
-  FULL_ACCESS_ROLE,
-  USER_ROLES,
+  NO_PERMS,
+  createRole,
+  roleDeletable,
   createUser,
+  deleteRoles,
   deleteUser,
+  getRoles,
   getUsers,
   getAdminAccount,
   resetUserPassword,
-  roleGrantsFull,
+  updateRole,
   updateUser,
   type ManagedUser,
+  type Perms,
+  type Role,
 } from '../lib/adminApi';
+import {useMe} from '../lib/useIdentity';
 import {errorMessage} from '../lib/errors';
 import {formatAdminTime} from '../lib/time';
 import {toastError, toastInfo} from '../lib/toast';
@@ -76,7 +88,7 @@ type GroupBy = 'role' | 'status' | 'none';
 /** 點表頭排序的比較方式(一律寫升冪) */
 const USER_COMPARATORS: Partial<Record<string, (a: Row, b: Row) => number>> = {
   username: (a, b) => (a.user.display_name || a.user.username).localeCompare(b.user.display_name || b.user.username, 'zh-Hant'),
-  role: (a, b) => (a.user.role || DEFAULT_USER_ROLE).localeCompare(b.user.role || DEFAULT_USER_ROLE),
+  role: (a, b) => a.user.role_name.localeCompare(b.user.role_name, 'zh-Hant'),
   // 使用中在前
   status: (a, b) => Number(a.user.disabled) - Number(b.user.disabled),
   password_changed_at: (a, b) =>
@@ -85,8 +97,8 @@ const USER_COMPARATORS: Partial<Record<string, (a: Row, b: Row) => number>> = {
 };
 
 const GROUP_OPTIONS: Array<{value: GroupBy; label: string}> = [
-  // 叫「依職務」不叫「依權限」—— 職稱就是權限,這一頁看的是
-  // 「誰是 Software engineer、誰是 Consultant」,不是抽象的「權限」。
+  // 叫「依職務」不叫「依權限」—— 職稱就是權限,而使用者在這一頁
+  // 想的是「誰是工程師、誰是顧問」,不是抽象的「權限」。
   {value: 'none', label: '不分組'},
   {value: 'role', label: '依職務'},
   {value: 'status', label: '依狀態'},
@@ -99,18 +111,15 @@ const GROUP_OPTIONS: Array<{value: GroupBy; label: string}> = [
  * 而這兩組的順序是有意義的 —— **要留意的排前面**(完整權限、已停用),
  * 打開這一頁的人先看到的就該是那幾個。
  */
-const GROUP_ORDER: Record<GroupBy, string[]> = {
-  // 分組標籤直接用**職稱本身**(完整權限 = Software engineer,唯讀 = Consultant)
-  // —— 這一頁不講「權限」。
-  role: [FULL_ACCESS_ROLE, CONSULTANT_ROLE],
-  status: ['已停用', '使用中'],
-  none: ['全部帳號'],
-};
+function groupOrder(groupBy: GroupBy, roles: Role[]): string[] {
+  // 依職務:分組標籤是**角色名本身**,順序照角色分頁那張表(角色可以自訂)
+  if (groupBy === 'role') return roles.map((r) => r.name);
+  if (groupBy === 'status') return ['已停用', '使用中'];
+  return ['全部帳號'];
+}
 
 function groupKeyOf(row: Row, groupBy: GroupBy): string {
-  // ⚠️ 從**職稱**推,不要讀 `tools`(職稱就是權限)。
-  // 兩者由後端保證一致,但畫面上只認一個來源,不然哪天不一致時這裡會說謊。
-  if (groupBy === 'role') return roleGrantsFull(row.user.role) ? FULL_ACCESS_ROLE : CONSULTANT_ROLE;
+  if (groupBy === 'role') return row.user.role_name;
   if (groupBy === 'status') return row.user.disabled ? '已停用' : '使用中';
   return '全部帳號';
 }
@@ -121,13 +130,40 @@ function mfaButtonLabel(enabled: boolean): string {
 }
 
 export default function Users() {
-  const {data, loading, failed, reload} = useAsyncData(useCallback(() => getUsers(), []));
+  const me = useMe();
+  const {data, loading, failed, reload: reloadUsers} = useAsyncData(useCallback(() => getUsers(), []));
+  /** 角色分頁那張表;帳號分頁的「依職務」順序、職稱框的下拉選單也讀它 */
+  const rolesData = useAsyncData(useCallback(() => getRoles(), []));
+  const reloadRoles = rolesData.reload;
+  /** 改帳號會動到角色的人數、改角色會動到帳號的權限 —— 兩份一起重抓 */
+  const reload = useCallback(() => {
+    reloadUsers();
+    reloadRoles();
+  }, [reloadUsers, reloadRoles]);
+  const roles = rolesData.data ?? [];
+  /** 上方兩個分頁 */
+  const [tab, setTab] = useState<'accounts' | 'roles'>('accounts');
+  /** 角色分頁:左邊勾選的角色(勾了右上出現「刪除 N 個角色」) */
+  const [selectedRoles, setSelectedRoles] = useState<Set<string>>(() => new Set());
+  /** 正在改哪個角色('new' = 新增角色;null = 對話框收起來) */
+  const [editingRoleDef, setEditingRoleDef] = useState<Role | 'new' | null>(null);
+  /** 等確認要刪的角色(null = 確認框收起來) */
+  const [pendingRoleDelete, setPendingRoleDelete] = useState<Role[] | null>(null);
+  const [roleDeleteBusy, setRoleDeleteBusy] = useState(false);
+  const roleDeleteExit = useDialogExit((open: boolean) => {
+    if (!open) setPendingRoleDelete(null);
+  });
   /**
    * 管理員自己那一筆。**他不在上面那份清單裡**(密碼在 .env,不在 users 表),
    * 所以要另外撈 —— 少了它,權限最大的帳號永遠發不到 QR,
    * 而那會讓「全面強制」開不起來。
+   * ⚠️ 只有管理員本人撈得到(後端 403):有 Users 權限的一般帳號沒有這一塊。
    */
-  const adminAccount = useAsyncData(useCallback(() => getAdminAccount(), []));
+  const adminAccount = useAsyncData(
+    useCallback(() => (me.is_admin ? getAdminAccount() : Promise.resolve(null)), [me.is_admin]),
+  );
+  /** 有 Users 權限的一般帳號:給不出自己沒有的權限,權限清單上那幾格是灰的。管理員不受限 */
+  const limit = me.is_admin ? undefined : me.perms;
   /** 正在忙的那個帳號 —— 只鎖那一列的選單,不要整頁 disabled */
   const [busy, setBusy] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
@@ -145,14 +181,14 @@ export default function Users() {
   /** 正在幫誰產生 QR code。null = 對話框關著。 */
   const [issuingMfa, setIssuingMfa] = useState<string | null>(null);
   const [query, setQuery] = useState('');
-  // 預設**不分組**:多數時候打開這一頁只是要找某一個人,
-  // 預設分組反而多一層要收合的東西。
+  // 預設**不分組**。多數時候
+  // 打開這一頁只是要找某一個人,預設分組反而多一層要收合的東西。
   const [groupBy, setGroupBy] = useState<GroupBy>('none');
   /** 收合的分組。**由這一層持有**(hook 的契約),不是 hook 自己記 */
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
 
   /**
-   * 每個操作都走這一條:busy → toast → reload。
+   * 每個操作都走這一條(必須保留的行為):busy → toast → reload。
    * 各自寫一份的話,遲早有一個忘記關 busy 或忘記重抓。
    */
   const act = useCallback(
@@ -189,7 +225,7 @@ export default function Users() {
       key: 'username',
       header: '帳號',
       /*
-       * 四個內容欄**各佔四分之一**。
+       * 四個內容欄**各佔四分之一**(只有四欄,職稱欄不該特別大)。
        *
        * 任何一欄給 `proportional(1.5)` 或 `pixel(...)`,都會變成「有一欄特別寬」
        * (剩餘空間全被某一欄吃掉)。全部給同一個 `proportional(1)` 才是真的平均,
@@ -209,10 +245,10 @@ export default function Users() {
           <VStack gap={0}>
             <Text type="label">{user.display_name || user.username}</Text>
             {/*
-              ⚠️ 顯示名跟帳號**一樣的時候不要印第二行**(常見的情況是
-              `display_name === username`,整欄會變成上下兩行同一個字)。
-              第二行的用意是「這個人對應到哪個帳號」,兩個字一樣時它不傳達任何東西,
-              只把列高變成兩倍。
+              ⚠️ 顯示名跟帳號**一樣的時候不要印第二行**(在正式機的資料上量到的:
+              十九個帳號裡十九個都是 `display_name === username`,於是整欄變成
+              「arnold / arnold」上下兩行同一個字)。第二行的用意是「這個人是誰
+              對應到哪個帳號」,兩個字一樣時它不傳達任何東西,只把列高變成兩倍。
             */}
             {user.display_name && user.display_name !== user.username ? (
               <Text type="supporting" color="secondary">
@@ -229,23 +265,18 @@ export default function Users() {
       width: proportional(1),
       renderCell: ({user}) =>
         /*
-         * 沒設過的顯示成灰字的預設值,不要留空白格 —— 空白會讓人以為
-         * 「這個人沒有職稱」,而實際上他在 @ 選單裡確實會顯示 Consultant。
+         * 角色名(後端已把空的、對不上的退回預設角色)。有個人加減的人旁邊掛「個人」,滑過去列出加減了哪幾項。
+         * 職稱右邊不掛權限小方塊:權限一多每列會掛一排,
+         * 要看某角色有什麼去角色分頁。
          */
-        /*
-         * ⚠️ **只印職稱,不要再掛一顆「完整權限」的標記**。
-         * 職稱就是權限,而職稱字串本身已經寫著 `Software engineer` ——
-         * 旁邊再放一顆寫「完整權限」的膠囊,是同一件事在同一格裡講兩次。
-         * 分組標籤(依職務)用的也是同一組字。
-         */
-        <HStack gap={2} vAlign="center">
-          {user.role ? (
-            <Text type="body">{user.role}</Text>
-          ) : (
-            <Text type="supporting" color="secondary">
-              {DEFAULT_USER_ROLE}(預設)
-            </Text>
-          )}
+        <HStack gap={2} vAlign="center" wrap="wrap">
+          <Text type="body">{user.role_name}</Text>
+          {/* ⚠️ 要先判 `user.own`:表格量欄寬時會拿一列 `user` 是空字串的假資料來畫,直接 Object.keys 會整頁炸掉 */}
+          {user.own && Object.keys(user.own).length ? (
+            <Tooltip content={describeOwn(user.own)} delay={BADGE_TOOLTIP_DELAY}>
+              <Token label="個人" size="sm" />
+            </Tooltip>
+          ) : null}
         </HStack>,
     },
     /*
@@ -280,8 +311,10 @@ export default function Users() {
             {user.password_changed_at ? formatAdminTime(user.password_changed_at) : '從未修改'}
           </Text>
           {/*
-            「還在用預設密碼」標在**這一欄**,不放在標題底下的副標
-            (管理頁不放說明文字)。標在人身上,資訊也從「有 N 個」變成「是這幾個」。
+            「還在用預設密碼」標在**這一欄**。
+            不放在標題底下的副標(「其中 N 個還在用預設密碼」):
+            三個管理頁不放說明文字,而這件事又必須有地方講。標在人身上之後
+            兩件事同時成立:說明文字消失,而且從「有 N 個」變成「是這幾個」。
 
             ⚠️ StatusDot **不能只靠顏色**(設計系統自己的 Do/Don't),
             所以旁邊一定要有看得見的字,`label` 只餵給報讀軟體。
@@ -305,7 +338,7 @@ export default function Users() {
           isDisabled={busy === user.username}
           items={[
             {
-              // 沒有單獨的「權限」項:改職稱就等於改權限,兩個入口只會互相打架
+              // 權限那一項移除:改職稱就等於改權限,兩個入口只會互相打架
               label: '修改職稱',
               onClick: () => setEditingRole(user),
             },
@@ -367,7 +400,7 @@ export default function Users() {
   const grouped = useTableGroupedRows<Row>({
     data: table.data,
     groupBy: (row) => groupKeyOf(row, groupBy),
-    groupOrder: GROUP_ORDER[groupBy],
+    groupOrder: groupOrder(groupBy, roles),
     collapsedGroups: collapsed,
     onToggleGroup: (key) =>
       setCollapsed((prev) => {
@@ -383,19 +416,60 @@ export default function Users() {
     <AdminPage
       title="帳號管理"
       actions={
-        <Button
-          label="新增帳號"
-          /* ⚠️ 圖示要包 `Icon`,不要直接畫 `<UserPlus size={16} />`:
-             那條路徑不會套設計系統的尺寸與顏色。 */
-          icon={<Icon icon={UserPlus} size="sm" />}
-          variant="primary"
-          size="sm"
-          onClick={() => setIsCreating(true)}
-        />
+        tab === 'accounts' ? (
+          <Button
+            label="新增帳號"
+            /* ⚠️ 圖示要包 `Icon`,不要直接畫 `<UserPlus size={16} />`:
+               那條路徑不會套設計系統的尺寸與顏色。 */
+            icon={<Icon icon={UserPlus} size="sm" />}
+            variant="primary"
+            size="sm"
+            onClick={() => setIsCreating(true)}
+          />
+        ) : (
+          <HStack gap={2}>
+            {/* 左邊勾了才出現(位置在新增角色的左邊) */}
+            {selectedRoles.size > 0 ? (
+              <Button
+                label={`刪除 ${selectedRoles.size} 個角色`}
+                variant="secondary"
+                size="sm"
+                onClick={() => setPendingRoleDelete(roles.filter((r) => selectedRoles.has(r.id)))}
+              />
+            ) : null}
+            <Button
+              label="新增角色"
+              icon={<Icon icon={Plus} size="sm" />}
+              variant="primary"
+              size="sm"
+              onClick={() => setEditingRoleDef('new')}
+            />
+          </HStack>
+        )
       }
     >
+      {/* 上方兩個分頁 */}
+      <TabList value={tab} onChange={(v) => setTab(v as 'accounts' | 'roles')} hasDivider>
+        <Tab value="accounts" label="帳號" />
+        <Tab value="roles" label="角色" />
+      </TabList>
+      {tab === 'roles' ? (
+        <AsyncSection
+          loading={rolesData.loading}
+          failed={rolesData.failed}
+          reload={reloadRoles}
+          hasData={!!rolesData.data}
+          isEmpty={roles.length === 0}
+          errorTitle="角色清單載入失敗。"
+          loadingLabel="正在載入角色"
+          emptyText="還沒有任何角色。"
+        >
+          <RolesTable roles={roles} selected={selectedRoles} setSelected={setSelectedRoles} onOpen={setEditingRoleDef} />
+        </AsyncSection>
+      ) : (
+      <>
       {/* 工具列:搜尋 + 分組維度。跟表分開一塊,一眼分得出哪邊是可以動的。
-          ⚠️ 用 `Card` 不用 `Section`(Section 沒有外框線)—— 三個管理頁的每一塊一律是 Card,
+          ⚠️ 用 `Card` 不用 `Section`(要有外框線)—— 三個管理頁的每一塊一律是 Card,
           外框線與左右緣對齊都由它負責,不要混用 Section。 */}
       <Card variant="muted">
         <HStack gap={3} vAlign="end" wrap="wrap">
@@ -438,8 +512,9 @@ export default function Users() {
           <HStack gap={3} vAlign="center" wrap="wrap">
             <StackItem size="fill">
               {/*
-                ⚠️ 只留「這是誰、他是管理員」。刻意不顯示手機驗證的狀態,
-                也不放說明文字(強制與否、管理員不在清單裡)。
+                ⚠️ 只留「這是誰、他是管理員」。手機驗證的狀態與那兩段說明
+                (強制與否、管理員不在清單裡)刻意不放。
+                **不要因為覺得資訊不足就加回來** —— 要加先問。
               */}
               <HStack gap={2} vAlign="center" wrap="wrap">
                 <Text type="label">{adminAccount.data.username}</Text>
@@ -480,11 +555,13 @@ export default function Users() {
           </TableCard>
         </Stack>
       </AsyncSection>
+      </>
+      )}
 
       {/*
         ⚠️ `onCreated` **只做重抓**,不要在這裡 `setIsCreating(false)` ——
-        那是硬關,對話框會在成功的那一幀瞬間消失,而按「取消」反而有 165ms 的淡出。
-        關閉交給對話框自己走 `requestClose`,
+        那是硬關,對話框會在成功的那一幀瞬間消失,而按「取消」反而有 165ms 的淡出
+        (方向正好反了)。關閉交給對話框自己走 `requestClose`,
         真正的 `setIsCreating(false)` 由延後的 `onOpenChange(false)` 帶。
       */}
       <CreateUserDialog isOpen={isCreating} onOpenChange={setIsCreating} onCreated={reload} />
@@ -520,6 +597,8 @@ export default function Users() {
            ⚠️ `edit-role:` 這個前綴不能拿掉,理由見上面 `IssueMfaDialog` 那段。 */
         key={`edit-role:${editingRole?.username ?? 'none'}`}
         user={editingRole}
+        roles={roles}
+        limit={limit}
         onOpenChange={(open) => {
           if (!open) setEditingRole(null);
         }}
@@ -527,12 +606,60 @@ export default function Users() {
         onSaved={reload}
       />
 
+      {/* 角色設定(新增 / 修改)。⚠️ key 前綴同上一段的理由,換一個角色就重新掛載 */}
+      <RoleDialog
+        key={`role-def:${editingRoleDef === 'new' ? 'new' : (editingRoleDef?.id ?? 'none')}`}
+        role={editingRoleDef}
+        limit={limit}
+        onOpenChange={(open) => {
+          if (!open) setEditingRoleDef(null);
+        }}
+        onSaved={reload}
+        onDelete={(r) => setPendingRoleDelete([r])}
+      />
+
+      {/* 刪角色的確認框。一個刪不掉後端就全部不刪,原因直接顯示在提示裡 */}
+      <AlertDialog
+        isOpen={pendingRoleDelete !== null}
+        {...roleDeleteExit.dialogProps}
+        title={
+          pendingRoleDelete && pendingRoleDelete.length > 1
+            ? `刪除 ${pendingRoleDelete.length} 個角色?`
+            : `刪除 ${pendingRoleDelete?.[0]?.name ?? ''}?`
+        }
+        description={`${(pendingRoleDelete ?? []).map((r) => r.name).join('、')} 刪除後就不能再指派給帳號。`}
+        actionLabel="刪除角色"
+        // 同上面刪帳號那顆:不用 destructive(紅底紅字看不到)
+        actionVariant="primary"
+        cancelLabel="取消"
+        isActionLoading={roleDeleteBusy}
+        onAction={() => {
+          const doomed = pendingRoleDelete;
+          if (!doomed || roleDeleteBusy) return;
+          setRoleDeleteBusy(true);
+          deleteRoles(doomed.map((r) => r.id))
+            .then(() => {
+              toastInfo(`已刪除 ${doomed.map((r) => r.name).join('、')}。`);
+              setSelectedRoles(new Set());
+              // 刪的是修改框裡那一個時,修改框跟著收
+              setEditingRoleDef((cur) => (cur && cur !== 'new' && doomed.some((r) => r.id === cur.id) ? null : cur));
+              reload();
+            })
+            .catch((err) => toastError(errorMessage(err, '角色刪不掉。')))
+            .finally(() => {
+              setRoleDeleteBusy(false);
+              roleDeleteExit.requestClose();
+            });
+        }}
+      />
+
       {/*
-        刪除要講清楚後果:問答紀錄留著、但人進不來了。
+        刪除要講清楚後果(必須保留的行為):問答紀錄留著、但人進不來了。
         只寫「確定刪除嗎」的話,管理員無從判斷這個動作會不會弄丟資料。
       */}
       {/*
-        ⚠️ `AlertDialog` 也要接共用退場(跟同一頁另外兩個框一樣演 165ms 淡出)。
+        ⚠️ `AlertDialog` 是全站第十個浮層,**一定要接共用退場** ——
+        不接的話同一頁另外兩個框演 165ms 淡出,它卻是硬切,而它正好是最危險的那一個。
         它內部就是 `Dialog`,`{...rest}` 會把記號傳下去(`AlertDialog.tsx:157`);
         `onOpenChange` 要靠 `dialogProps` 帶進來 —— 它排在 `{...rest}` **後面**,
         直接寫一個同名的 prop 會蓋掉我們包過的那一份。
@@ -573,12 +700,12 @@ export default function Users() {
  * 欄位各自從 `children` 傳進來 —— 兩個框的內容差很多(一欄 vs 三欄),
  * 硬要一起通用只會讓這裡長出一堆旗標。
  *
- * ⚠️ **在輸入框按 Enter 一定要能送出**(「打完字按 Enter」是所有人的直覺)。
+ * ⚠️ **在輸入框按 Enter 要能送出是必須保留的行為**(「打完字按 Enter」是所有人的直覺)。
  * 靠的是主鈕自己 `type="submit" form={formId}`:主鈕畫在 footer、不在 <form> 裡面,用 form 屬性掛回去,
- * 它就是這張表單的預設按鈕,Enter 會按到它。
+ * 它就是這張表單的預設按鈕,Enter 會按到它,不用另外藏一顆原生 submit。
  *
  * ⚠️ `onOpenChange` **一份管三個出口**(右上角 X、取消鈕、Esc)。
- * 點外面**不會**關(`purpose="form"`—— 打到一半點到背景會丟掉內容)。
+ * 點外面**不會**關(`purpose="form"` —— 打到一半點到背景會丟掉內容)。
  * X 若走沒有 reset 的那份,「打了字 → 按 X → 再開」欄位還留著,
  * 但按 Esc 就清掉了 —— 同一個「關掉」有兩種結果。
  */
@@ -589,15 +716,19 @@ function FormDialog({
   submitLabel,
   busy,
   onSubmit,
+  start,
   children,
 }: {
   isOpen: boolean;
   title: string;
+  /** 左下角(角色設定的「刪除角色」+「影響 N 人」);主要動作照舊靠右 */
+  start?: ReactNode;
   /**
    * 退場(淡出 + 縮一點點)要演得完,`close()` 就得延後 —— 全站共用同一支。
    * ⚠️ **這支 hook 由呼叫端持有,不在這裡建**:送出成功之後要關的是呼叫端
-   * (它才知道「成功了」),而它拿不到這裡的區域變數。建在這裡的話,成功路徑
-   * 只能硬關,變成「按取消會淡出、存檔成功反而瞬間消失」。
+   * (它才知道「成功了」),而它拿不到這裡的區域變數。在這裡建的話,
+   * 兩個框的成功路徑只能硬關 `setIsCreating(false)`,結果是
+   * 「按取消會淡出、存檔成功反而瞬間消失」。
    */
   exit: DialogExit;
   submitLabel: string;
@@ -610,6 +741,7 @@ function FormDialog({
     /*
      * `purpose="form"`:打過字之後點背景**不會關**(Astryx Dialog:「Use purpose="form" for
      * dialogs with inputs so user can't accidentally lose data」)。取消 / × / Esc 照常關。
+     * 用 info 的話,打到一半點到背景就整個關掉、內容全丟。
      */
     <Dialog isOpen={isOpen} {...exit.dialogProps} purpose="form" width={480}>
       <Layout
@@ -633,7 +765,8 @@ function FormDialog({
                 `LayoutFooter` 只負責把內容放到底部那一列,**不會**幫子層加間隔 ——
                 裸放兩顆 Button 它們就是貼在一起。包一層 HStack 給 gap。 */}
             {/* 靠右:跟其他對話框一致(Astryx 的對話框 / Card footer 慣例是動作靠右) */}
-            <HStack gap={2} hAlign="end">
+            <HStack gap={2} hAlign="end" vAlign="center">
+              {start ? <StackItem size="fill">{start}</StackItem> : null}
               <Button label="取消" variant="secondary" onClick={exit.requestClose} />
               <Button label={submitLabel} variant="primary" isLoading={busy} type="submit" form={formId} />
             </HStack>
@@ -645,59 +778,53 @@ function FormDialog({
 }
 
 /**
- * 修改職稱 —— **同時也是改權限**(職稱就是權限)。
+ * 「某某的職稱」—— 選角色 + 同一份權限清單做**個人加減**。
  *
- * **兩選一,不是自由輸入**:職稱決定這個人能不能在主機上跑指令,
- * 打錯一個字母(`Software Engineer` 大寫 E)就會靜靜地變成唯讀。
- * 選單只給 `USER_ROLES` 那兩個值,打不錯。
+ * 清單先帶「角色的值套上這個人的加減」;跟角色不同的那幾項旁邊標「個人」。
+ * 存的時候送完整清單,後端只存跟角色不同的那幾項 —— 改回跟角色一樣就自動不是個人設定,不需要還原鈕。
+ * 換角色時個人加減照留(那是對「這個人」下的決定)。
  *
- * 對話框裡不放權限後果的說明;權限的變化記在稽核紀錄裡(`role_changed` 的 detail)。
+ * 對話框裡不放後果說明,
+ * 權限的後果只留在稽核紀錄裡(`role_changed` / `perms_changed` 的 detail)。
  */
 function EditRoleDialog({
   user,
+  roles,
+  limit,
   onOpenChange,
   onSaved,
 }: {
   user: ManagedUser | null;
+  roles: Role[];
+  /** 有 Users 權限的一般帳號:自己沒有的權限不能打開。管理員是 undefined */
+  limit?: Perms;
   onOpenChange: (open: boolean) => void;
   onSaved: () => void;
 }) {
-  /*
-   * ⚠️ 初始值要帶**畫面上看到的那個職稱**,不能是 `user.role ?? ''`。
-   *
-   * `role` 是 nullable(沒設過職稱的帳號很常見)—— 那些人的 `?? ''` 會落在
-   * 空字串,也就是「清掉」。於是:打開對話框、什麼都不改、按儲存,
-   * 後端收到 `role: ''` 就把職稱清掉、`tools` 設成 None。
-   *
-   * 所以退回 `DEFAULT_USER_ROLE`:那正是職稱欄對這些人顯示的字
-   * (「Consultant(預設)」),所以「不改就按儲存」= 把畫面上看到的值寫實,
-   * 權限不動。這個初始值只在掛載時取一次,所以呼叫端用 `key` 讓換人時重新掛載。
-   */
-  const [draft, setDraft] = useState(user?.role || DEFAULT_USER_ROLE);
+  /* 初始值只在掛載時取一次,所以呼叫端用 `key` 讓換人時重新掛載 */
+  const [roleId, setRoleId] = useState(user?.role ?? '');
+  /** 個人加減(只有跟角色不同的那幾項) */
+  const [own, setOwn] = useState<Partial<Perms>>(user?.own ?? {});
   const [busy, setBusy] = useState(false);
   /** 退場由這裡持有(不是 `FormDialog`)—— 送出成功也要走它,見 `FormDialog` 的 `exit` */
   const exit = useDialogExit(onOpenChange);
   const [error, setError] = useState<string | null>(null);
 
   const username = user?.username ?? '';
+  const base = roles.find((r) => r.id === roleId)?.perms ?? user?.perms ?? NO_PERMS;
+  const value: Perms = {...base, ...own};
 
   const submit = async () => {
     if (!user || busy) return;
-    /*
-     * ⚠️ 空值第二道:選單只給兩個合法值,理論上到不了這裡 ——
-     * 但「送出空字串」的後果是清掉職稱兼改權限,而那是靜悄悄發生的。
-     * 一道防線擋不住的東西不該只有一道。
-     */
-    const next = draft.trim();
-    if (!next) {
+    if (!roles.some((r) => r.id === roleId)) {
       setError('請選一個職稱。');
       return;
     }
     setBusy(true);
     setError(null);
     try {
-      await updateUser(user.username, {role: next});
-      // 只講「存好了」,不附職稱與權限的說明
+      await updateUser(user.username, {role: roleId, perms: value});
+      // 只講「存好了」—— 不放職稱與權限的說明
       toastInfo(`${user.username} 已儲存。`);
       onSaved();
       // 成功也要演退場(不是硬關)—— 跟按「取消」走同一條路
@@ -718,29 +845,242 @@ function EditRoleDialog({
       busy={busy}
       onSubmit={() => void submit()}
     >
-      <VStack gap={2}>
+      <VStack gap={4}>
         {/* 錯誤跟登入頁同一個樣子(見 components/FieldMessage.tsx) */}
         <FieldWithMessage error={error}>
           <Selector
             label="職稱"
-            options={[...USER_ROLES]}
-            value={draft}
+            options={roles.map((r) => ({value: r.id, label: r.name}))}
+            value={roleId}
             placeholder="選一個職稱"
             onChange={(value: string) => {
-              setDraft(value);
+              setRoleId(value);
               setError(null);
             }}
           />
         </FieldWithMessage>
+        <PermList
+          value={value}
+          base={base}
+          limit={limit}
+          onChange={(next) => {
+            // 只留跟角色不同的那幾項:改回跟角色一樣就不再是個人設定
+            const diff: Partial<Perms> = {};
+            for (const k of Object.keys(next) as Array<keyof Perms>) {
+              if (next[k] !== base[k]) (diff as Record<string, unknown>)[k] = next[k];
+            }
+            setOwn(diff);
+          }}
+        />
       </VStack>
     </FormDialog>
   );
 }
 
+type RoleRow = Record<string, unknown> & {id: string; role: Role};
+
+/**
+ * 角色分頁那張表:只列角色名(人數跟權限圖示看起來太亂)。
+ *
+ * 左邊是設計系統的多選勾選框,勾了右上出現「刪除 N 個角色」;**預設角色、有人用的角色勾不了**。
+ * **點整列打開設定**,左邊勾選那一格除外(不是只點名稱)——
+ * 寫法是 rowClick 外掛:Astryx 的 `Table` 沒有 onRowClick,能碰到 `<tr>` 的只有外掛。
+ * 名字仍是連結,給鍵盤用(Tab 得到、Enter 打得開),跟 `useTableRowLink` 同一個分工。
+ */
+function RolesTable({
+  roles,
+  selected,
+  setSelected,
+  onOpen,
+}: {
+  roles: Role[];
+  selected: Set<string>;
+  setSelected: Dispatch<SetStateAction<Set<string>>>;
+  onOpen: (role: Role) => void;
+}) {
+  const rows: RoleRow[] = useMemo(() => roles.map((role) => ({id: role.id, role})), [roles]);
+  const {selectionConfig} = useTableSelectionState<RoleRow>({
+    data: rows,
+    idKey: 'id',
+    selectedKeys: selected,
+    setSelectedKeys: setSelected,
+    getIsItemEnabled: (row) => roleDeletable(row.role),
+  });
+  const selection = useTableSelection<RoleRow>({...selectionConfig, getRowLabel: (row) => row.role.name});
+  const rowClick = useMemo<TablePlugin<RoleRow>>(
+    () => ({
+      transformBodyRow: (props, item) => ({
+        ...props,
+        xstyle: [...props.xstyle, styles.clickable],
+        htmlProps: {
+          ...props.htmlProps,
+          // 點在勾選那一格是勾選、點在名字連結上交給連結,其他地方都是打開設定
+          onClick: (e: React.MouseEvent) => {
+            const t = e.target as HTMLElement;
+            if (t.closest('input, label, a') || isSelectCell(t)) return;
+            onOpen(item.role);
+          },
+        },
+      }),
+    }),
+    [onOpen],
+  );
+  const columns: TableColumn<RoleRow>[] = [
+    {
+      key: 'name',
+      header: '角色',
+      width: proportional(1),
+      renderCell: ({role}) => (
+        <HStack gap={2} vAlign="center">
+          <Link
+            href={`#role-${encodeURIComponent(role.id)}`}
+            onClick={(e) => {
+              e.preventDefault();
+              onOpen(role);
+            }}
+          >
+            {role.name}
+          </Link>
+          {role.is_default ? <Token label="預設" size="sm" /> : null}
+        </HStack>
+      ),
+    },
+  ];
+  return (
+    <TableCard>
+      <Table<RoleRow>
+        data={rows}
+        columns={columns}
+        idKey="id"
+        plugins={{selection, rowClick}}
+        density="balanced"
+        dividers="rows"
+        hasHover
+      />
+    </TableCard>
+  );
+}
+
+/** 點到的是不是左邊勾選那一格(第一格、裡面有勾選框)—— 那一格點了是勾選,不是打開。照抄 FlowList.isSelectCell */
+function isSelectCell(t: HTMLElement): boolean {
+  const cell = t.closest('td');
+  return !!cell && cell === cell.parentElement?.firstElementChild && !!cell.querySelector('input[type="checkbox"]');
+}
+
+/**
+ * 角色設定(新增 / 修改):名字 + 權限清單。
+ * 修改時左下有「刪除角色」(預設角色、有人用的角色是灰的),旁邊的狀態字是「影響 N 人」。
+ */
+function RoleDialog({
+  role,
+  limit,
+  onOpenChange,
+  onSaved,
+  onDelete,
+}: {
+  role: Role | 'new' | null;
+  limit?: Perms;
+  onOpenChange: (open: boolean) => void;
+  onSaved: () => void;
+  onDelete: (role: Role) => void;
+}) {
+  const isNew = role === 'new';
+  const current = role && role !== 'new' ? role : null;
+  const [name, setName] = useState(current?.name ?? '');
+  const [perms, setPerms] = useState<Perms>(current?.perms ?? NO_PERMS);
+  const [busy, setBusy] = useState(false);
+  const exit = useDialogExit(onOpenChange);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    if (busy) return;
+    const clean = name.trim();
+    if (!clean) {
+      setError('請填角色名稱。');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      if (current) {
+        await updateRole(current.id, {name: clean, perms});
+        toastInfo(`${clean} 已儲存。`);
+      } else {
+        await createRole(clean, perms);
+        toastInfo(`${clean} 已建立。`);
+      }
+      onSaved();
+      exit.requestClose();
+    } catch (err) {
+      setError(errorMessage(err, current ? '角色改不動。' : '角色建立失敗。'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <FormDialog
+      isOpen={role !== null}
+      title={isNew ? '新增角色' : `修改 ${current?.name ?? ''}`}
+      exit={exit}
+      submitLabel={isNew ? '建立' : '儲存'}
+      busy={busy}
+      onSubmit={() => void submit()}
+      start={
+        current ? (
+          <HStack gap={3} vAlign="center">
+            <Button
+              label="刪除角色"
+              variant="secondary"
+              isDisabled={!roleDeletable(current)}
+              onClick={() => onDelete(current)}
+            />
+            {/* 狀態字,不是說明:改這個角色會動到幾個人(稽核也記這個數) */}
+            {current.member_count > 0 ? (
+              <Text type="supporting" color="secondary">
+                影響 {current.member_count} 人
+              </Text>
+            ) : null}
+          </HStack>
+        ) : null
+      }
+    >
+      <VStack gap={4}>
+        <FieldWithMessage error={error}>
+          <TextInput
+            label="角色名稱"
+            value={name}
+            placeholder="例如 業務"
+            onChange={(value: string) => {
+              setName(value);
+              setError(null);
+            }}
+            hasAutoFocus={isNew}
+          />
+        </FieldWithMessage>
+        <PermList value={perms} onChange={setPerms} limit={limit} />
+      </VStack>
+    </FormDialog>
+  );
+}
+
+const styles = stylex.create({
+  // 角色表整列可點(跟 FlowList 同一個寫法)
+  clickable: {cursor: 'pointer'},
+});
+
+/**
+ * 提示框的延遲。⚠️ **不要改成 0**:「個人」那顆掛在**每一列**上,
+ * 0 的話滑鼠掃過整張表,提示框一路跟著跳。120 是站內「滑過去才講」的慣例
+ *(`PersonDisplay` 的 @人名卡片、`Sidebar` 共享對話的成員卡片)。
+ */
+const BADGE_TOOLTIP_DELAY = 120;
+
 /** 帳號名稱的規則 —— **照抄後端 `backend/app/ids.py` 的 `NAME`**,兩邊要一起改 */
 const USERNAME_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 /**
- * 不合格時的說明。**刻意是英文**,是管理頁內容一律中文的例外。
+ * 不合格時的說明。**刻意是英文**,是管理頁內容一律中文的例外 ——
+ * 記在 .claude/CLAUDE.md。
  */
 const USERNAME_RULE = 'Use only letters, numbers, underscores (_) and hyphens (-), up to 64 characters.';
 
@@ -783,8 +1123,8 @@ function CreateUserDialog({
     if (!name || busy) return;
     /*
      * 先在這裡擋格式。後端擋得到,但它回的是 pydantic 的原文
-     * 「String should match pattern '^[A-Za-z0-9_-]{1,64}$'」—— 正規式直接丟給使用者看。
-     * 規則要跟後端那條 pattern 一字不差,改一邊就要改另一邊。
+     * 「String should match pattern '^[A-Za-z0-9_-]{1,64}$'」—— 正規式直接丟給使用者看,
+     * 所以這裡給英文說明。規則要跟後端那條 pattern 一字不差,改一邊就要改另一邊。
      */
     if (!USERNAME_PATTERN.test(name)) {
       setError(USERNAME_RULE);

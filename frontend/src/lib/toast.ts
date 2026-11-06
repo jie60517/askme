@@ -221,7 +221,10 @@ export function toastNotice(message: string, uniqueID?: string) {
  * 多留幾秒讓人來得及按(預設 8 秒);按了之後用**同一個 uniqueID** 再發一則,就會把這則換掉,
  * 不會疊兩則。
  */
-export function toastWithAction(message: string, action: NoticeAction, uniqueID: string, autoHideMs = 8000) {
+/** 帶動作鈕的提示停多久:多留幾秒讓人來得及按(`toastWithAction` 與 `PetSpeechToast` 共用) */
+export const ACTION_HIDE_MS = 8000;
+
+export function toastWithAction(message: string, action: NoticeAction, uniqueID: string, autoHideMs = ACTION_HIDE_MS) {
   showNotice({text: message, kind: 'success', action, uniqueID, autoHideMs});
 }
 

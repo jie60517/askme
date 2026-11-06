@@ -37,7 +37,7 @@ router = APIRouter(prefix="/api", tags=["locks"])
 @router.get(
     "/locks",
     response_model=schemas.LocksOut,
-    dependencies=[Depends(auth.require_admin)],
+    dependencies=[Depends(auth.require_perm("security"))],
 )
 def list_locks():
     return schemas.LocksOut(**ratelimit.snapshot())
@@ -46,7 +46,7 @@ def list_locks():
 @router.post(
     "/locks/unlock",
     status_code=204,
-    dependencies=[Depends(auth.require_admin)],
+    dependencies=[Depends(auth.require_perm("security"))],
 )
 def unlock(req: schemas.UnlockRequest):
     if not req.username and not req.ip:

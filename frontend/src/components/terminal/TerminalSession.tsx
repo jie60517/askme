@@ -272,19 +272,19 @@ export function TerminalSession({
    * 兩邊各寫一份的話,以後改欄寬又會分岔。
    * ⚠️ `autoSaveId` **每次改預設值都要跟著改版號**:`useResizable` 會把**預設值本身**也寫進
    * `astryx-resizable:<autoSaveId>`(沒拖過的人也有),不換版號的話預設值改了對用過的人完全沒有效果。
-   * ⚠️ `minSizePx` **不能大於預設值**,不然一開頁就停在一個拖不回去的寬度。
+   * ⚠️ `minSize` **不能大於預設值**,不然一開頁就停在一個拖不回去的寬度。
    * 200 只是「比預設再窄一點、Name 還看得到」。預設值的組成改了要回來重看它。
    */
   const files = useResizable({
     defaultSize: PANEL_DEFAULT_PX,
-    minSizePx: 200,
-    maxSizePx: 900,
+    minSize: 200,
+    maxSize: 900,
     autoSaveId: 't100_terminal_files_v5',
   });
   const aiPane = useResizable({
     defaultSize: 380,
-    minSizePx: 300,
-    maxSizePx: 640,
+    minSize: 300,
+    maxSize: 640,
     autoSaveId: 't100_terminal_ai',
   });
 

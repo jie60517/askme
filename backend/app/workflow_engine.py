@@ -905,13 +905,15 @@ def _owner_problem(owner: str) -> Optional[str]:
     """排程負責人現在還能不能讓主機跑東西。可以回 None,不行回給人看的原因。
 
     排程觸發的執行以負責人的身分跑主機指令,所以每次到點都重看一次,條件同手動執行
-    (`routers/workflows.require_engineer` → `auth.can_use_terminal`),原因直接問同一份判斷
-    (`auth.terminal_denial`)。負責人被刪掉的話 `schedule.by` 是封存名(`users.archived_name`),
+    (`routers/workflows.require_workflow` → `auth.can_workflow`),原因先問 `auth.terminal_denial`
+    (不存在 / 停用 / 沒有 SSH Server)。負責人被刪掉的話 `schedule.by` 是封存名(`users.archived_name`),
     查不到,算「不存在」。
     """
     from . import auth
 
     denial = auth.terminal_denial(owner)
+    if denial is None and not auth.can_workflow(owner):
+        denial = "沒有 Work Flow 權限"
     return None if denial is None else f"排程負責人 {owner} {denial}"
 
 

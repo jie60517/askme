@@ -191,14 +191,35 @@ def _opt_vpn() -> list[dict]:
 #: 照職稱**字串相等**比(管理員的職稱是 Admin,前兩組都不該圈到他),ALL 是全部。
 #: 存的是群組本身、**跑的時候才展開** —— 之後新增的同職稱帳號也收得到,停用的跳過。
 #: 值用 `group:` 開頭:帳號名只能是英數 `_-`(見 ids.py),不會撞到。
-#: 群組 → (畫面上的字, 圈哪個職稱;None = 全部)。兩邊各一份(一個 Python、一個 TS),
-#: `test_people_groups_match_the_chat_mention_menu` 會讀前端原始碼對字。
-PEOPLE_GROUPS: dict[str, tuple[str, Optional[str]]] = {
-    "group:consultant": ("All Consultant", "Consultant"),
-    "group:engineer": ("All Software Engineer", "Software engineer"),
-    "group:all": ("ALL", None),
-}
+#: 每個角色一組 + ALL,照角色表的順序。兩個種子角色用固定的鍵(`group:consultant` / `group:engineer`),
+#: 新角色的鍵是 `group:role:<id>`。畫面上的字是「All <角色名>」,跟前端 `lib/mentionGroups.ts` 同一個規則。
+GROUP_ALL = "group:all"
+_ROLE_GROUP_PREFIX = "group:role:"
 MAX_PEOPLE = 50
+
+
+def group_key(role_id: str) -> str:
+    """角色 → 「All <角色>」群組存在流程圖裡的鍵。"""
+    return _legacy_group_keys().get(role_id) or f"{_ROLE_GROUP_PREFIX}{role_id}"
+
+
+def _legacy_group_keys() -> dict[str, str]:
+    """兩個種子角色沿用的舊鍵。角色 id 的正本在 roles.py(延後 import:這個模組平常不碰資料庫)。"""
+    from . import roles
+
+    return {roles.ROLE_CONSULTANT: "group:consultant", roles.ROLE_ENGINEER: "group:engineer"}
+
+
+def _group_role(key: str) -> Optional[str]:
+    """群組鍵 → 角色 id(`group:all` 與不是群組的回 None)。"""
+    for rid, k in _legacy_group_keys().items():
+        if key == k:
+            return rid
+    return key[len(_ROLE_GROUP_PREFIX):] if key.startswith(_ROLE_GROUP_PREFIX) else None
+
+
+def _is_group(key: str) -> bool:
+    return key == GROUP_ALL or _group_role(key) is not None
 
 
 def _active_people() -> list[dict]:
@@ -208,12 +229,24 @@ def _active_people() -> list[dict]:
 
 
 def _group_members(key: str, people: list[dict]) -> list[str]:
-    _, role = PEOPLE_GROUPS[key]
-    return [p["username"] for p in people if role is None or p.get("role") == role]
+    """群組裡的人:ALL = 全部;角色群組照 `role_id` 比(管理員的 role_id 是空的,不在任何角色群組裡)。"""
+    if key == GROUP_ALL:
+        return [p["username"] for p in people]
+    rid = _group_role(key)
+    return [p["username"] for p in people if rid is not None and p.get("role_id") == rid]
+
+
+def _groups() -> list[tuple[str, str]]:
+    """(鍵, 畫面上的字):每個角色一組(角色表的順序),最後是 ALL。"""
+    from . import roles
+
+    roles.ensure_seeded()
+    ranked = sorted(roles.role_ranks().items(), key=lambda kv: kv[1][1])
+    return [(group_key(rid), f"All {name}") for rid, (name, _) in ranked] + [(GROUP_ALL, "ALL")]
 
 
 def _opt_people() -> list[dict]:
-    """@ 選單的名單:人(含自己 —— 流程跑完要通知自己是正常的,跟聊天不同)+ 三個群組。"""
+    """@ 選單的名單:人(含自己 —— 流程跑完要通知自己是正常的,跟聊天不同)+ 每個角色一組 + ALL。"""
     people = _active_people()
     out = [
         {"value": p["username"], "label": p.get("display_name") or p["username"], "role": p.get("role") or ""}
@@ -221,7 +254,7 @@ def _opt_people() -> list[dict]:
     ]
     out += [
         {"value": k, "label": label, "group": True, "count": len(_group_members(k, people))}
-        for k, (label, _) in PEOPLE_GROUPS.items()
+        for k, label in _groups()
     ]
     return out
 
@@ -232,7 +265,7 @@ def recipients(who: list) -> list[str]:
     active = {p["username"] for p in people}
     out: list[str] = []
     for w in who or []:
-        names = _group_members(w, people) if w in PEOPLE_GROUPS else [w]
+        names = _group_members(w, people) if _is_group(w) else [w]
         for n in names:
             if n in active and n not in out:
                 out.append(n)
@@ -259,6 +292,37 @@ def rename_person(graph: Any, old: str, new: str) -> bool:
                 cfg[f.key] = [new if w == old else w for w in value]
                 changed = True
     return changed
+
+
+def flows_using_role(role_id: str) -> list[str]:
+    """通知名單用到「All <這個角色>」的流程名稱(有用到就不能刪角色,不然那些通知會發給空名單)。"""
+    import json
+
+    from . import models
+    from .database import SessionLocal
+
+    key = group_key(role_id)
+    db = SessionLocal()
+    try:
+        rows = db.query(models.Workflow.name, models.Workflow.graph).filter(models.Workflow.graph.contains(key)).all()
+    finally:
+        db.close()
+    out: list[str] = []
+    for name, raw in rows:
+        try:
+            graph = json.loads(raw or "{}")
+        except ValueError:
+            continue
+        nodes = graph.get("nodes") if isinstance(graph, dict) else None
+        for node in nodes if isinstance(nodes, list) else []:
+            spec = NODES.get(str(node.get("type") or "")) if isinstance(node, dict) else None
+            cfg = node.get("cfg") if spec is not None else None
+            if isinstance(cfg, dict) and any(
+                f.kind == "people" and isinstance(cfg.get(f.key), list) and key in cfg[f.key] for f in spec.fields
+            ):
+                out.append(name)
+                break
+    return out
 
 
 NODES: dict[str, NodeSpec] = {

@@ -196,3 +196,30 @@ def purge_expired_steps() -> int:
         return deleted
     finally:
         db.close()
+
+
+#: 已經存在的資料庫要補的欄位:(資料表, 欄位)。`create_all` 只建缺少的表、不動已存在的表,
+#: 所以之後在既有表上加的欄位要列在這裡,開機時補上。只加 nullable 欄位,舊資料留 NULL = 沒設過。
+ADDED_COLUMNS = [
+    ("users", "perm_overrides"),
+    ("user_prefs", "companion_visible"),
+    ("user_prefs", "shortcuts"),
+]
+
+
+def ensure_columns() -> None:
+    """幫已經存在的資料表補上 `ADDED_COLUMNS`。型別照 models 裡那個 Column 對當下的資料庫編譯(SQLite / Postgres 都走這支)。"""
+    from sqlalchemy import inspect, text
+
+    from . import models  # noqa: F401 —— `Base.metadata` 是 import models 的那一刻才註冊的
+
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    have = {t: {c["name"] for c in inspector.get_columns(t)} for t in {t for t, _ in ADDED_COLUMNS} & tables}
+    with engine.begin() as conn:
+        for table, column in ADDED_COLUMNS:
+            if table not in tables or column in have[table]:
+                continue
+            coltype = Base.metadata.tables[table].columns[column].type.compile(dialect=engine.dialect)
+            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}"))
+            have[table].add(column)

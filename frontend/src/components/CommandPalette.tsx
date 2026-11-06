@@ -68,7 +68,7 @@ import {
 } from '@astryxdesign/core/Layout';
 import {Pagination} from '@astryxdesign/core/Pagination';
 import {Text} from '@astryxdesign/core/Text';
-import {useAnnounce, useHotkeys} from '@astryxdesign/core/hooks';
+import {useAnnounce} from '@astryxdesign/core/hooks';
 import {useTranslator} from '@astryxdesign/core/i18n';
 import {Icon} from '@astryxdesign/core/Icon';
 
@@ -80,6 +80,7 @@ import {
   type SearchHit,
 } from '../lib/conversationsApi';
 import {useDialogExit} from './useDialogExit';
+import {useShortcut} from '../lib/shortcuts';
 import {formatShortDate} from '../lib/time';
 import {transitionMs} from '../lib/transitionMs';
 
@@ -287,24 +288,21 @@ export function CommandPalette({
   /** 熱鍵的回呼只註冊一次,`isOpen` 要用 ref 讀當下那一份 */
   const isOpenRef = useRef(isOpen);
   isOpenRef.current = isOpen;
-  useHotkeys([
-    {
-      keys: 'mod+k',
-      // 在輸入框裡也要能叫得出來:使用者常常打到一半才想起要找舊對話
-      allowInInputs: true,
-      /*
-       * ⚠️ 關那一半要走 `requestClose`,不然退場來不及演(見 `useDialogExit`)。
-       * ⚠️ **退場那 165ms 裡 `isOpen` 還是 `true`** —— 不先問 `cancelClose()` 的話
-       * 這一按會走到「關」那一半而被吃掉,使用者要再按一次才叫得回來。
-       * 取消之後面板從當下那一幀反向回來。
-       */
-      onPress: () => {
-        if (exit.cancelClose()) return;
-        if (isOpenRef.current) exit.requestClose();
-        else setIsOpen(true);
-      },
-    },
-  ]);
+  /*
+   * 預設 Ctrl / ⌘ + K,可以在 Settings → Keyboard shortcuts 改鍵或停用(`lib/shortcuts.ts`)。
+   * 帶修飾鍵的組合在輸入框裡也叫得出來:使用者常常打到一半才想起要找舊對話。
+   */
+  useShortcut('search', () => {
+    /*
+     * ⚠️ 關那一半要走 `requestClose`,不然退場來不及演(見 `useDialogExit`)。
+     * ⚠️ **退場那 165ms 裡 `isOpen` 還是 `true`** —— 不先問 `cancelClose()` 的話
+     * 這一按會走到「關」那一半而被吃掉,使用者要再按一次才叫得回來。
+     * 取消之後面板從當下那一幀反向回來。
+     */
+    if (exit.cancelClose()) return;
+    if (isOpenRef.current) exit.requestClose();
+    else setIsOpen(true);
+  });
 
   /** 關掉就整個歸零 —— 下一次打開是乾淨的(不用設計系統的殼,所以它的 `handleClose` 不會幫忙做) */
   useEffect(() => {

@@ -524,6 +524,8 @@ def shareable_users(viewer: str = Depends(auth.require_user)):
             username=u["username"],
             display_name=u["display_name"],
             role=u["role"],
+            role_id=u.get("role_id", ""),
+            role_rank=u.get("role_rank", -1),
             # ⚠️ **不要漏掉頭像**。這一欄是 `peopleDirectory` 唯一的來源,
             # 而側邊欄的共用名單、@ 選單、對話裡的同事頭像全都走那份名冊 ——
             # 漏掉的話每個人都設了照片,畫面上卻一律是名字縮寫,

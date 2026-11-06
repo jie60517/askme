@@ -21,7 +21,7 @@ from typing import Optional
 
 from sqlalchemy import select
 
-from . import config, models
+from . import config, models, roles
 from .database import SessionLocal
 
 logger = logging.getLogger(__name__)
@@ -218,9 +218,8 @@ def display_name(username: str) -> str:
 
 
 def is_power_user(username: str) -> bool:
-    """這個帳號能不能用完整工具組(含 Bash)。打錯字(非 "full")一律當唯讀。"""
-    entry = get(username)
-    return bool(entry) and str(entry.get("tools", "")).strip().lower() == "full"
+    """這個帳號有沒有「AI 可執行指令」(完整工具組,含 Bash)。由角色 + 個人加減決定。"""
+    return roles.user_perms(username)["ai_exec"]
 
 
 def is_default_password(username: str) -> bool:
@@ -315,6 +314,7 @@ def list_users() -> list[dict]:
     # 一次撈回所有已綁定的帳號再比對。一列查一次的話,N 個帳號就是 N 趟往返,
     # 而這一頁本來就是一次列出全部的人。
     bound = mfa.enabled_usernames()
+    names = roles.role_names()
 
     db = SessionLocal()
     try:
@@ -338,7 +338,9 @@ def list_users() -> list[dict]:
                     "display_name": u.display_name or u.username,
                     "tools": u.tools,
                     "disabled": u.disabled,
-                    "role": u.role,
+                    # role = 實際算哪個角色的 id(空的、對不上的退回預設角色);own = 個人加減;perms = 實際權限
+                    **(access := roles.user_access(u, db)),
+                    "role_name": names.get(access["role"], access["role"]),
                     "created_at": u.created_at,
                     "password_changed_at": u.password_changed_at,
                     "is_default_password": is_default,
@@ -359,32 +361,14 @@ def exists(username: str) -> bool:
     return get(username) is not None
 
 
-#: 職稱的兩個合法值,**順序就是下拉選單的順序**。
-#:
-#: ⚠️ 大小寫照資料庫既有的值(`Software engineer`,小寫 e)。改大小寫等於
-#: 讓既有資料全部對不上 `role_grants_full()`,那些人的權限會在下一次
-#: 存檔時被降級,而畫面上看不出來。
-#:
-#: **`ROLES` 是這兩個字串的正本。** 另外還有兩份不得不存在的副本 ——
-#: `schemas.RoleName`(Pydantic 的 `Literal` 只吃字面值,餵不進常數)與前端
-#: `adminApi.ts` 的 `USER_ROLES`(跨語言)。要改職稱**先改這裡**,另外兩份抄過去;
-#: 漂掉會被 `tests/test_users_role.py` 的兩條釘樁測試擋下來。
-ROLE_CONSULTANT = "Consultant"
-ROLE_ENGINEER = "Software engineer"
-ROLES = [ROLE_CONSULTANT, ROLE_ENGINEER]
-
-#: 哪些職稱帶完整權限(可以在主機上跑 Bash)。
-#:
-#: ⚠️ **職稱就是權限**。
-#: `role` 是唯一來源,`tools` 由它推導出來、只是給 agent.py 讀的快取欄位。
-#: **不要從別的地方寫 `tools`** —— 兩個地方都能寫就一定會不一致,而不一致的
-#: 那一面是「畫面顯示 Consultant、實際上有 Bash」。
-_FULL_ROLES = {ROLE_ENGINEER}
+#: 兩個種子角色的 id(= 舊職稱字串)。正本在 roles.py,這裡只是別名;`users.role` 存的是角色 id,權限由 roles.py 決定。
+ROLE_CONSULTANT = roles.ROLE_CONSULTANT
+ROLE_ENGINEER = roles.ROLE_ENGINEER
 
 
 def role_grants_full(role: Optional[str]) -> bool:
-    """這個職稱帶不帶完整權限。認不得的職稱一律當唯讀(往安全的那邊倒)。"""
-    return normalize_role(role) in _FULL_ROLES
+    """這個角色有沒有「AI 可執行指令」。認不得的角色算預設角色(往安全的那邊倒)。"""
+    return roles.role_perms(normalize_role(role) or None)["ai_exec"]
 
 
 def normalize_role(raw: Optional[str]) -> str:
@@ -408,9 +392,8 @@ def create_user(
 ) -> bool:
     """新增帳號,密碼設成預設值(首次登入會被強制改)。已存在或是保留名(is_reserved_name)回 False。
 
-    ⚠️ **刻意沒有 `full` 參數**(職稱就是權限)。權限一律由 `role`
-    推導;不給 role 就是 `DEFAULT_ROLE`(Consultant)= 唯讀。
-    新帳號預設唯讀是刻意的:要給完整權限就建完之後改職稱,那一步會寫稽核。
+    ⚠️ **刻意沒有權限參數**。權限一律由角色推導;不給 role 就是 `DEFAULT_ROLE`(Consultant)。
+    要給更多權限就建完之後改角色,那一步會寫稽核。
 
     **帳號一律存小寫。** 登入不分大小寫(見 get / resolve),所以 `Ming` 跟 `ming`
     是同一個人 —— 真的建出兩列的話,resolve 只會挑到其中一個,另一個的對話
@@ -436,10 +419,10 @@ def create_user(
                 username=username,
                 password=hash_password(config.DEFAULT_USER_PASSWORD),
                 display_name=(display_name or username).strip() or username,
-                # 沒填 → 預設職稱(Consultant),權限跟著它推導 = 唯讀。
-                # 存實際的職稱字串而不是 None:新帳號不是「從沒設過」,是「明確給了預設職稱」。
+                # 沒填 → 預設角色(Consultant)。存實際的角色 id 而不是 None:新帳號不是「從沒設過」,是「明確給了預設角色」。
+                # `tools` 不再寫(也不讀,權限由角色決定);perm_overrides 寫 {} = 在新制下建的,不看舊的兩個勾選
                 role=normalize_role(role) or DEFAULT_ROLE,
-                tools="full" if role_grants_full(role or DEFAULT_ROLE) else None,
+                perm_overrides="{}",
                 disabled=False,
                 created_by=created_by,
                 password_changed_at=None,  # 從沒改過 → is_default_password 會是 True → 強制改
@@ -462,11 +445,8 @@ def set_role(username: str, role: Optional[str]) -> bool:
         u = db.get(models.User, username.strip())
         if u is None:
             return False
+        # 權限由角色決定(roles.py),個人加減照留。清掉 → 退回預設角色。
         u.role = normalize_role(role) or None
-        # ⚠️ **權限跟著職稱一起寫**。分兩次寫、或讓呼叫端自己記得也要改 tools,
-        # 遲早會出現「職稱是 Consultant 但還有 Bash」。
-        # 清掉職稱 → 認不得 → 退回唯讀,這是往安全的那邊倒。
-        u.tools = "full" if role_grants_full(u.role) else None
         db.commit()
         return True
     except Exception:  # noqa: BLE001
@@ -544,6 +524,7 @@ RENAMED_USER_COLUMNS = (
     ("conversation_notes", "mentioned"),  # 逗號分隔的名單,逐個換
     ("conversation_shares", "shared_by"),
     ("users", "created_by"),
+    ("roles", "created_by"),  # 誰建的角色
     ("workflows", "created_by"),
     ("workflows", "updated_by"),
     ("workflows", "schedule"),  # json 裡的 "by"(排程記在誰名下)
@@ -703,6 +684,57 @@ def _pick(value: str, allowed: frozenset) -> Optional[str]:
 _HEX_COLOR = re.compile(r"#[0-9a-f]{6}")
 
 
+#: 可以改的快捷鍵(Settings → Keyboard shortcuts)。跟前端 `lib/shortcuts.ts` 的
+#: `SHORTCUTS` 是同一份 id(`tests/test_shortcut_prefs.py` 讀前端原始碼對),不認得的 id 不存。
+SHORTCUT_IDS = frozenset({"search", "new_chat", "sidebar"})
+#: 一個按鍵名(`KeyboardEvent.key`)最長幾個字:最長的是 "ArrowRight" 這一類,16 綽綽有餘
+_MAX_KEY_CHARS = 16
+
+
+def clean_shortcuts(raw: object) -> Optional[dict]:
+    """改過的快捷鍵:只留認得的 id,值是 `False`(停用)或 `{mod, shift, alt, key}`。
+
+    格式不對的那一筆當成沒改(照預設),不整包拒絕 —— 這是偏好,一筆壞掉不該讓其他筆也存不了。
+    回 None = 什麼都沒改(存 NULL)。
+    """
+    if not isinstance(raw, dict):
+        return None
+    out: dict = {}
+    # 只看認得的 id(數量固定),送來的字典再大也只走這幾圈
+    for sid in sorted(SHORTCUT_IDS & raw.keys()):
+        value = raw[sid]
+        if value is False:
+            out[sid] = False
+            continue
+        if not isinstance(value, dict):
+            continue
+        key = value.get("key")
+        if not isinstance(key, str) or not key or len(key) > _MAX_KEY_CHARS or not key.isprintable():
+            continue
+        mod, alt = value.get("mod") is True, value.get("alt") is True
+        # 一定要帶 Ctrl / ⌘ 或 Alt(前端 lib/shortcuts.ts 的 recordKey):單鍵收進來,全站的 Enter / Space 會被吃掉
+        if not (mod or alt):
+            continue
+        out[sid] = {
+            "mod": mod,
+            "shift": value.get("shift") is True,
+            "alt": alt,
+            "key": key,
+        }
+    return out or None
+
+
+def _load_shortcuts(text: Optional[str]) -> Optional[dict]:
+    """資料庫那一欄讀出來;讀不懂就當成沒改(照預設),不讓設定對話框整個打不開。"""
+    if not text:
+        return None
+    try:
+        return clean_shortcuts(json.loads(text))
+    except ValueError:
+        logger.warning("快捷鍵設定讀不懂,照預設:%r", text[:200])
+        return None
+
+
 def _pick_color(value: str) -> Optional[str]:
     """Bloub 的顏色:色票裡的名字,或 `#rrggbb`。不認得的回 None。"""
     picked = _pick(value, COMPANION_COLORS)
@@ -727,6 +759,11 @@ def get_prefs(username: Optional[str]) -> dict:
         "companion": None,
         "companion_shape": None,
         "companion_color": None,
+        # ⚠️ 這兩個的「沒設過」不是 None 而是 **True** —— 它們是 opt-out,
+        # 而前端需要知道開關要畫在哪一邊。其餘幾項回 None 是因為前端有自己的預設。
+        "companion_visible": True,
+        # 改過的快捷鍵。None = 全部照預設
+        "shortcuts": None,
     }
     if not username:
         return empty
@@ -744,6 +781,9 @@ def get_prefs(username: Optional[str]) -> dict:
             "companion": pref.companion,
             "companion_shape": pref.companion_shape,
             "companion_color": pref.companion_color,
+            # NULL(沒設過)一律當成 True,跟 `empty` 同一條規矩
+            "companion_visible": pref.companion_visible is not False,
+            "shortcuts": _load_shortcuts(pref.shortcuts),
         }
     finally:
         db.close()
@@ -757,8 +797,12 @@ def set_display_prefs(
     companion: Optional[str] = None,
     companion_shape: Optional[str] = None,
     companion_color: Optional[str] = None,
+    companion_visible: Optional[bool] = None,
+    shortcuts: Optional[dict] = None,
 ) -> bool:
-    """記下字級、對比、常用模型與吉祥物(含 Bloub 的型態與顏色)。
+    """記下字級、對比、常用模型、吉祥物(含 Bloub 的型態與顏色、要不要畫)與快捷鍵。
+
+    `shortcuts` 是**整份**改過的快捷鍵(前端每次送全部),`{}` = 全部回到預設;None = 這次沒帶。
 
     **值一律夾在合法範圍內**,不夾的話 API 收得到 0 或 9999。
     常用模型則是**白名單比對**:不在 `config.ALLOWED_MODELS` 裡的一律當成沒帶,
@@ -793,6 +837,11 @@ def set_display_prefs(
             picked = pick(raw) if raw is not None else None
             if picked is not None:
                 setattr(pref, column, picked)
+        if companion_visible is not None:
+            pref.companion_visible = bool(companion_visible)
+        if shortcuts is not None:
+            cleaned = clean_shortcuts(shortcuts)
+            pref.shortcuts = json.dumps(cleaned, sort_keys=True) if cleaned else None
         db.commit()
         return True
     except Exception:  # noqa: BLE001
@@ -873,19 +922,8 @@ def set_theme(username: Optional[str], theme: str) -> bool:
         db.close()
 
 
-#: `users.role` 是空的時候算哪一種。
-#: ⚠️ 這裡的預設值是 `Consultant` = **唯讀**,而職稱就是權限:
-#: 空職稱一律往安全的那邊倒,不會有人因為沒設職稱而拿到 Bash。
-#:
-#: 什麼時候會用到這個預設值:
-#: 帳號的 role 是空的(NULL 或空字串)—— 從沒設過,或管理員在網頁上清掉了。
-#: 兩種都會在 `list_active()` 退回這裡(`u.get("role") or DEFAULT_ROLE`)。
-#: 職稱進資料庫的路:建帳號時選的職稱,與帳號管理頁的「修改職稱」。
-#: ⚠️ **不要再寫一次字面值**:`"Consultant"`
-#: 這個字串在整個後端只該出現在 `ROLE_CONSULTANT` 那一行。兩個常數是兩件事
-#: ——「Consultant 這個職稱」與「沒設過的人算什麼」—— 但值必須是同一個,而寫兩次
-#: 的話哪天改了一邊,`role_grants_full()` 就會對不上。
-DEFAULT_ROLE = ROLE_CONSULTANT
+#: `users.role` 是空的(或對不上任何角色)時算哪一個。正本在 roles.py(它不能刪)。
+DEFAULT_ROLE = roles.DEFAULT_ROLE
 
 #: 管理員(.env 的 ADMIN_USERNAME)的職稱。他不在 users 表裡,所以標不到 role 欄位。
 #: 寫全 "Admin",不要縮寫(一個字母看不出是什麼)。
@@ -897,7 +935,7 @@ def list_active() -> list[dict]:
 
     只回 username / display_name / role —— 這是**一般帳號**也打得到的清單
     (不然沒有人能分享),不該順便把權限、密碼狀態那些帶出去。
-    `role` 是資料庫的 `users.role`。⚠️ **它就是權限**(見 `_FULL_ROLES`)——
+    `role` 是角色在畫面上的名字(`role_id` 是它的 id)。角色決定權限(roles.py)——
     但這條 API 只回職稱字串,不回 `tools`:一般帳號打得到它,不該從這裡讀出
     「誰能跑 Bash」。
     沒設過與被清掉(都是 NULL)都退回 `DEFAULT_ROLE` —— 這裡用
@@ -930,20 +968,34 @@ def _active_accounts() -> list[dict]:
         )
     finally:
         db.close()
-    out = [
-        {
-            "username": username,
-            "display_name": display_name or username,
-            "role": role or DEFAULT_ROLE,
-        }
-        for username, display_name, role in rows
-    ]
+    # `role` 是**畫面上的名字**(@ 選單的副標、依職務分組),`role_id` 是角色的 id(Work Flow 的「All <角色>」展開用)。
+    # 空的、對不上的退回預設角色。
+    # `role_rank` = 角色在角色表的第幾個:@ 選單的「All <角色>」照它排,前端不必自己寫死種子角色的名字。
+    # 一次查好再對回去 —— 這條會被側欄每 8 秒打一次,不要一人一次查詢。
+    ranks = roles.role_ranks()
+    fallback = roles.resolve_role_id(None)
+    out = []
+    for username, display_name, role in rows:
+        rid = role if role in ranks else (role if not ranks and role in roles.SEEDS else fallback)
+        name, rank = ranks.get(rid, (rid, len(ranks)))
+        out.append(
+            {
+                "username": username,
+                "display_name": display_name or username,
+                "role": name,
+                "role_id": rid,
+                "role_rank": rank,
+            }
+        )
     if config.ADMIN_USERNAME and not any(u["username"] == config.ADMIN_USERNAME for u in out):
         out.append(
             {
                 "username": config.ADMIN_USERNAME,
                 "display_name": config.ADMIN_USERNAME,
                 "role": ADMIN_ROLE,
+                # 管理員不是角色:不屬於任何「All <角色>」群組
+                "role_id": "",
+                "role_rank": -1,
             }
         )
     return sorted(out, key=lambda u: u["username"])

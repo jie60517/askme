@@ -66,6 +66,7 @@ import {
   FileSpreadsheet,
   FileText,
   Lightbulb,
+  MessageSquare,
   Paperclip,
   PenLine,
   Pencil,
@@ -75,6 +76,8 @@ import {
 
 import {growStyles} from '../components/growShell';
 import {NoticeCard} from '../components/NoticeCard';
+import {NoteReceipt, seenInOrder} from '../components/NoteReceipt';
+import {ChatScrollButton} from '../components/ChatScrollButton';
 import {ComposerDictationButton} from '../components/ComposerDictationButton';
 import {FileLightbox} from '../components/FileLightbox';
 import {
@@ -132,6 +135,7 @@ import {
   type NoteItem,
 } from '../lib/chatApi';
 import {splitAnswer, splitStreamingAnswer} from '../lib/answerSections';
+import {mentionRoles} from '../lib/mentionGroups';
 import {copyText} from '../lib/clipboard';
 import {buildFileView, countFiles, stripIndexOf} from '../lib/conversationFiles';
 import {isImageFilename, isOfficeFilename, isPdfFilename} from '../lib/filekind';
@@ -144,7 +148,21 @@ import {
   notifyConversationsUpdated,
   type ShareablePerson,
 } from '../lib/conversationsApi';
+import {watchConversationNotes} from '../lib/notesLive';
 import {toolLabel} from '../lib/tools';
+import {ComposerSlot} from '../components/ComposerSlot';
+import {composerMode} from '../lib/composerMode';
+import {useModeReturnKb} from '../lib/useModeReturnKb';
+import {
+  carryGeneral,
+  clearCarriedGeneral,
+  generalActive as isGeneralOn,
+  GENERAL_COMMAND,
+  GENERAL_KB_ID,
+  isCarriedGeneral,
+  isGeneralConversation,
+  parseGeneralCommand,
+} from '../lib/generalMode';
 import {HOVER_QUERY, MOBILE_QUERY, useMediaQuery} from '../lib/media';
 import {
   conversationModelOf,
@@ -153,7 +171,6 @@ import {
   rememberConversationModel,
   usePreferredModel,
 } from '../lib/modelPref';
-import {CONSULTANT_ROLE, FULL_ACCESS_ROLE} from '../lib/adminApi';
 import {Landing as SharedLanding} from '../components/Landing';
 import {personName} from '../lib/people';
 import {MentionList} from '../components/MentionList';
@@ -689,6 +706,29 @@ const THINKING_QUIET_MS = 1500;
 const NBSP = ' ';
 
 /**
+ * 輸入框沒在打指令時墊的觸發器(`triggers` 不能傳空陣列)。
+ *
+ * ⚠️ 不能傳**空陣列**:`useTriggerMenu.handleInput` 對空的 triggers 是
+ * **提早 return,不 reset** —— 已經開著的面板就永遠關不掉。
+ * 傳一個字元永遠比不中的觸發器,`findActiveTrigger` 會回 null、走到 `reset()`,面板才會收。
+ * 字元用空白:`findActiveTrigger` 掃到空白就直接回 null,這個觸發器永遠不可能開出選單。
+ */
+const CLOSE_ONLY_TRIGGER = {
+  character: ' ',
+  searchSource: {search: () => [], bootstrap: () => []},
+  onSelect: () => '',
+};
+
+/** 輸入框是不是正在打 `/指令名`(從頭就是斜線、還沒打空格),而且至少有一個指令對得上 */
+function isCommandQuery(draft: string, matches: (query: string) => unknown[]): boolean {
+  const m = /^\s*\/(\S*)$/.exec(draft);
+  return !!m && matches(m[1]).length > 0;
+}
+
+/** `useModeReturnKb` 在還沒有對話 id 的空白頁用的 key */
+const NEW_CHAT_KEY = 'new';
+
+/**
  * 觸控裝置上 **Enter 是換行**,送出只走送出鈕。
  *
  * 設計系統的輸入框 Enter 一律送出、Shift+Enter 換行 —— 手機的虛擬鍵盤沒有 Shift,
@@ -894,6 +934,17 @@ export default function Chat() {
   /** 這組對話的檔案清單抓回來了沒(快取裡有也算)。只拿來決定過場什麼時候拍終點,見 `isReadyForMorph` */
   const [isFilesLoaded, setIsFilesLoaded] = useState(() => !routeId || peekConversationFiles(routeId) !== null);
   const [draft, setDraft] = useState('');
+  /**
+   * 一般模式 `/general`:這組對話**主動**進(true)或按 ✕ 離開(false);
+   * null = 沒動過,跟著這組對話上一題(`lib/generalMode.ts` 的 `generalActive`)。
+   * 空白頁送出第一句導過來的,初始值從 `carryGeneral` 接手(紀錄回來之前 Token 不閃回專案)。
+   */
+  const [generalChoice, setGeneralChoice] = useState<boolean | null>(() =>
+    routeId && isCarriedGeneral(routeId) ? true : null,
+  );
+  useEffect(() => {
+    if (routeId) clearCarriedGeneral(routeId);
+  }, [routeId]);
   /**
    * 這組對話裡**主動選**的模型。`null` = 沒選過,依序退回:這個環境的預設模型
    * (`knowledge_bases.json` 的 `default_model`,例如某個環境固定用 Sonnet)→ 個人設定的「常用模型」
@@ -1180,6 +1231,21 @@ export default function Chat() {
    * (`getConversationTurns` 回的本來就只有已完成的,長度就是題數。)
    */
   const finishedTurnCount = turns.length;
+
+  /*
+   * 即時推送(@ 便條已讀):有人看過便條、或有人寫了新便條,一秒內 `bumpNotes()` ——
+   * 跟 `CONVERSATIONS_UPDATED` 走同一條路(重抓便條 + 該標已讀的標已讀)。
+   * 連上那一下也算一次,斷線那段時間錯過的就補回來了(見 `lib/notesLive.ts`)。
+   * ⚠️ **要等有題目(或便條)才連**:還沒問過任何一題的對話沒有主人,後端一律回 4404,
+   * 而 4404 是「重連也沒用」—— 問完第一題之後就再也連不上了。有便條就一定有主人
+   * (先問一題才能 @ 人),歷史抓不到題目的時候也照樣連得上。
+   */
+  const canWatch = finishedTurnCount > 0 || notes.length > 0;
+  useEffect(() => {
+    if (!conversationId || !canWatch) return;
+    return watchConversationNotes(conversationId, bumpNotes);
+  }, [conversationId, canWatch]);
+
   useEffect(() => {
     void reloadNotes();
   }, [reloadNotes, finishedTurnCount, notesNonce]);
@@ -1271,8 +1337,8 @@ export default function Chat() {
     // ⚠️ 用**百分比**不是固定 px:固定 520 在窄一點的視窗上會把聊天欄壓扁,
     // 而這個面板的重點正是「聊天欄還看得到」。
     defaultSize: PANEL_DEFAULT_WIDTH,
-    minSizePx: PANEL_MIN_WIDTH,
-    maxSizePx: PANEL_MAX_WIDTH,
+    minSize: PANEL_MIN_WIDTH,
+    maxSize: PANEL_MAX_WIDTH,
     // 拉過的寬度記在 localStorage,不然每次打開都要重拉一次。
     autoSaveId: 't100_file_panel',
   });
@@ -1597,7 +1663,6 @@ export default function Chat() {
       return;
     }
 
-    const question = text;
     /*
      * 同一組對話同時只跑一題。送出鈕這時候是停止鈕(`isStopShown`),
      * 但**鍵盤的 Enter 還是走得到這裡** —— 靜靜吃掉的話,
@@ -1607,6 +1672,18 @@ export default function Chat() {
       refuseSubmit(text, 'Wait for the current answer to finish.');
       return;
     }
+
+    // `/general` = 進一般模式。只打 `/general` 不送出;後面帶字就是這一題,用一般模式送
+    //(這一下 state 還沒換過來,kb 在下面直接給)
+    const generalCmd = parseGeneralCommand(text);
+    if (generalCmd) {
+      setGeneralChoice(true);
+      if (!generalCmd.pending) {
+        setDraft('');
+        return;
+      }
+    }
+    const question = generalCmd ? generalCmd.pending : text;
 
     // 對話 id 在送出當下就決定,不等後端:網址、側邊欄、暫存狀態從第一秒就對得起來。
     const targetId = conversationId ?? newConversationId();
@@ -1619,7 +1696,7 @@ export default function Chat() {
     startStream({
       conversationId: targetId,
       question,
-      kb: effectiveKb,
+      kb: generalCmd ? GENERAL_KB_ID : modeSlot.kb,
       model: effectiveModel ?? undefined,
       files: upload.files,
     });
@@ -1637,7 +1714,11 @@ export default function Chat() {
     // 導頁之後這個元件會整個換掉(key={conversationId}),
     // 新掛上來的那一份會自己從模組層撈到剛送出的那一題。
     // 從空白頁送出第一句:輸入框從畫面中間滑到底部(`lib/chatTransition.ts`)
-    if (!conversationId) void morphChat(() => navigate(`/c/${targetId}`, {replace: true}));
+    if (!conversationId) {
+      modeReturn.carryTo(targetId);
+      if (generalCmd || general) carryGeneral(targetId);
+      void morphChat(() => navigate(`/c/${targetId}`, {replace: true}));
+    }
   }
 
   /*
@@ -1705,6 +1786,26 @@ export default function Chat() {
    * 那會讓新對話停在上一次挑的環境。續問不受影響:一組對話會留在它自己的專案。
    */
   const effectiveKb = kbChoice ?? conversationKb ?? config?.default_knowledge_base;
+  /** 一般模式開不開:這組對話選過的優先,沒選過就跟著這組對話上一題 */
+  const general = isGeneralOn({
+    choice: generalChoice,
+    conversationIsGeneral: isGeneralConversation(turns),
+  });
+  /**
+   * 輸入框底列「專案」那一格放什麼(一般模式 Token 或專案選單),以及這一題**真的送哪個環境**(lib/composerMode.ts)。
+   * 一般模式送保留代號 `general`,專案選單拿掉。
+   */
+  const modeSlot = composerMode({generalActive: general, projectKb: effectiveKb});
+  /**
+   * 離開一般模式回到**進模式前**選的專案。不記的話 conversationKb 取最後一則 = 一般模式問過的那題(`general`,
+   * 不在專案清單裡),按 ✕ 之後專案退回全站預設(理由在 lib/useModeReturnKb.ts)
+   */
+  const modeReturn = useModeReturnKb({
+    storeKey: conversationId ?? NEW_CHAT_KEY,
+    active: general,
+    projectKb: effectiveKb,
+    restore: setKbChoice,
+  });
 
   /** 這一題的專案顯示名(就是 workspace 底下的資料夾名,或 json 那筆的 label)。 */
   const effectiveKbLabel = knowledgeBases.find((b) => b.id === effectiveKb)?.label ?? effectiveKb ?? '';
@@ -1725,7 +1826,7 @@ export default function Chat() {
             // 選中的那一項除了打勾,還有一塊底色(global.css 的 .menu-item-current)
             className={kb.id === effectiveKb ? 'menu-item-current' : undefined}
             endContent={kb.id === effectiveKb ? <Icon icon={Check} size="sm" /> : undefined}
-            onClick={() => setKbChoice(kb.id)}
+            onClick={() => pickKnowledgeBase(kb.id)}
           />
         ))}
       </VStack>
@@ -1739,12 +1840,79 @@ export default function Chat() {
    */
   const effectiveModel = pickModel({
     chosen: modelChoice,
-    kbDefault: config?.knowledge_bases.find((b) => b.id === effectiveKb)?.default_model,
+    // 跟著**這一題真的送的環境**(一般模式沒有環境預設)
+    kbDefault: knowledgeBases.find((b) => b.id === modeSlot.kb)?.default_model,
     preferred: preferredModel,
     serverDefault: config?.default_model,
     allowed: config?.allowed_models,
   });
   const sendBlocked = isNote ? !!noteBlock : mentionableFailed && looksLikeMention(draft);
+
+  /**
+   * 換專案。**只影響這一組對話**(不記到 localStorage)。
+   */
+  const pickKnowledgeBase = (id: string) => {
+    setKbChoice(id);
+    modeReturn.notePick(id);
+  };
+
+  /**
+   * `/` 指令選單:只有網站內建的 `/general`(這一版沒有 skill 工具箱)。
+   *
+   * ⚠️ **只在輸入框最開頭才觸發** —— 使用者常常在貼 `/srv/app/src/main.py` 這類路徑,
+   * 空白後面的 `/` 也觸發的話,貼一次路徑就閃一次選單。擋法是整個觸發器不註冊(`commandActive`),
+   * 不是讓 search 回空陣列 —— 回空陣列選單還是會跳出來寫「No command matches that」。
+   */
+  const commandItems = useMemo(
+    () => [{id: GENERAL_COMMAND.name, label: GENERAL_COMMAND.name, auxiliaryData: GENERAL_COMMAND}],
+    [],
+  );
+  const commandMatches = useCallback(
+    (query: string) => {
+      const q = query.trim().toLowerCase();
+      if (!q) return commandItems;
+      return commandItems.filter((item) => item.id.startsWith(q));
+    },
+    [commandItems],
+  );
+  const commandTrigger = useMemo(
+    () => ({
+      character: '/',
+      searchSource: {search: commandMatches, bootstrap: () => commandItems},
+      renderItem: (item: {label: string; auxiliaryData?: unknown}) => {
+        const aux = item.auxiliaryData as {summary?: string; name?: string} | undefined;
+        return (
+          <VStack gap={0}>
+            <Text type="label">{`/${aux?.name ?? item.label}`}</Text>
+            <Text type="supporting" color="secondary">
+              {aux?.summary}
+            </Text>
+          </VStack>
+        );
+      },
+      // 後面補一個空格:按一下 Enter 就送出、進一般模式
+      onSelect: (item: {id: string}) => `/${item.id} `,
+      menuLabel: 'Commands',
+      // 碰不到:沒有符合的時候整個觸發器不掛(見 `commandActive`)
+      emptySearchText: 'No command matches that',
+    }),
+    [commandItems, commandMatches],
+  );
+  /*
+   * `/` 觸發器掛不掛:從頭就是斜線才掛;打到**沒有符合的指令**、或指令名後面打了空格也不掛 ——
+   * 掛著的話選單一直開著寫「No command matches that」,跟著輸入框飄。
+   * `draft === ''` 也算:使用者打下 `/` 的當下 draft 還是空的。
+   */
+  const commandActive = draft === '' || isCommandQuery(draft, commandMatches);
+  /*
+   * ⚠️ 換了觸發器之後要**補一次 input 事件**:設計系統是在 input 事件裡拿「當下的」觸發器判斷要開還是收,
+   * 而 draft 是那一下之後才更新的 —— 不補的話打到不符合那一下選單照開、刪回符合那一下選單不開。
+   */
+  useEffect(() => {
+    composerBoxRef.current
+      ?.querySelector<HTMLElement>('[contenteditable="true"]')
+      ?.dispatchEvent(new Event('input', {bubbles: true}));
+  }, [commandActive]);
 
   /**
    * 輸入框裡打 `@` → 打開**跟 @ 按鈕同一顆**選人浮層。
@@ -1958,28 +2126,15 @@ export default function Chat() {
    */
   const mentionGroups = useMemo(
     () => [
-      {
-        key: 'consultant',
-        // ⚠️ label 是**畫面上的字**,故意不從常數組出來:職稱字串是
-        // `Software engineer`(小寫 e),而這兩顆按鈕上寫的是標題式大小寫。
-        // 用來**篩選**的才是常數。
-        label: 'All Consultant',
-        /*
-         * ⚠️ 用**字串相等**比,不要用 `!roleGrantsFull(p.role)`:管理員的職稱是
-         * `Admin`,兩個群組本來就都不該圈到他,而「非工程師」會把他掃進 Consultant 那組。
-         * 字串本身走 `adminApi` 的常數,不要在這裡再寫一次字面值。
-         */
-        usernames: mentionable
-          .filter((p) => p.role === CONSULTANT_ROLE)
-          .map((p) => p.username),
-      },
-      {
-        key: 'engineer',
-        label: 'All Software Engineer',
-        usernames: mentionable
-          .filter((p) => p.role === FULL_ACCESS_ROLE)
-          .map((p) => p.username),
-      },
+      /*
+       * 每個角色一組「All <角色名>」(跟 Work Flow 的通知群組同一個規則)。
+       * 分組與順序照後端給的 role_id / role_rank(見 lib/mentionGroups.ts):管理員不在任何角色群組裡,前端不寫死角色名。
+       */
+      ...mentionRoles(mentionable).map((g) => ({
+        key: `role:${g.name}`,
+        label: `All ${g.name}`,
+        usernames: g.usernames,
+      })),
       {key: 'all', label: 'ALL', usernames: mentionable.map((p) => p.username)},
     ],
     [mentionable],
@@ -2387,6 +2542,8 @@ export default function Chat() {
               <ChatComposerInput
                 handleRef={composerInputRef}
                 onKeyDown={newlineOnTouchEnter}
+                // 只有 `/` 一種觸發器(`@` 走 MentionPicker 浮層);沒在打指令時墊 CLOSE_ONLY_TRIGGER,不能是空陣列
+                triggers={commandActive ? [commandTrigger] : [CLOSE_ONLY_TRIGGER]}
               />
             }
             footerActions={
@@ -2479,23 +2636,33 @@ export default function Chat() {
                 {/*
                   專案。只有**兩個以上**才出現 —— 只有一個的時候那顆下拉點開只會看到自己。
                 */}
-                {knowledgeBases.length > 1 ? (
-                  <DropdownMenu
-                    // 選單**照內容寬**,不跟按鈕一樣寬:專案名稱長短不一,短的按鈕不該把選單壓窄
-                    menuWidth="max-content"
-                    button={{
-                      label: effectiveKbLabel,
-                      'aria-label': `Project: ${effectiveKbLabel}`,
-                      // Building2 = 公司 / 專案;避開資料夾類圖示,不然跟旁邊 Files 那顆分不出來
-                      icon: <Icon icon={Building2} size="sm" />,
-                      variant: 'ghost',
-                      size: 'sm',
-                      ...COMPOSER_ACTION,
-                    }}
-                  >
-                    {projectMenu}
-                  </DropdownMenu>
-                ) : null}
+                {/* 一般模式中這一格換成模式 Token(✕ = 離開),換的時候演過場,不硬切(ComposerSlot) */}
+                <ComposerSlot slotKey={modeSlot.key}>
+                  {modeSlot.token ? (
+                    <Token
+                      label={modeSlot.token}
+                      icon={<Icon icon={MessageSquare} size="sm" />}
+                      onRemove={() => setGeneralChoice(false)}
+                    />
+                  ) : null}
+                  {modeSlot.showProject && knowledgeBases.length > 1 ? (
+                    <DropdownMenu
+                      // 選單照內容寬,不要跟按鈕一樣寬
+                      menuWidth="max-content"
+                      button={{
+                        label: effectiveKbLabel,
+                        'aria-label': `Project: ${effectiveKbLabel}`,
+                        // Building2 = 公司 / 專案;避開資料夾類圖示,不然跟旁邊 Files 那顆分不出來
+                        icon: <Icon icon={Building2} size="sm" />,
+                        variant: 'ghost',
+                        size: 'sm',
+                        ...COMPOSER_ACTION,
+                      }}
+                    >
+                      {projectMenu}
+                    </DropdownMenu>
+                  ) : null}
+                </ComposerSlot>
                 {/* 模型。對話中途換得了 —— 後端每一題都重讀這個欄位。 */}
                 {(config?.allowed_models.length ?? 0) > 1 ? (
                   <DropdownMenu
@@ -2656,7 +2823,8 @@ export default function Chat() {
             <Stack width="100%" maxWidth={LANDING_WIDTH}>
               {composerNode}
             </Stack>
-            {config !== null ? <LandingCategories onPick={handleEdit} /> : null}
+            {/* 範例題是 ERP 的,一般模式不放 */}
+            {config !== null && !general ? <LandingCategories onPick={handleEdit} /> : null}
           </VStack>
         </Stack>
       ) : (
@@ -2665,7 +2833,13 @@ export default function Chat() {
           前者是它訊息串的間距;後者讓聊天欄在側欄打開時縮得動 ——
           flex 子項的 min-width 預設是 auto,內容一寬(程式碼區塊)就擠不回去。
         */
-        <ChatLayout density="spacious" xstyle={styles.chatColumn} composer={composerNode}>
+        <ChatLayout
+          density="spacious"
+          xstyle={styles.chatColumn}
+          composer={composerNode}
+          // 換掉預設鈕:捲到底要自己收掉 New messages(理由見 ChatScrollButton 檔頭)
+          scrollButton={<ChatScrollButton />}
+        >
           <ChatMessageList ref={messageListRef} isStreaming={sending} xstyle={[styles.messageWidth, jumpToQa != null && styles.jumpPending]}>
             {items}
           </ChatMessageList>
@@ -3136,6 +3310,7 @@ const NoteBubble = memo(function NoteBubble({
    */
   const tokens = note.mentioned.map((u) => mentionToken(u, note.mentioned_names?.[u] ?? ''));
   const mine = isMine(note.author, username);
+  const receipt = <NoteReceipt seen={seenInOrder(note.seen)} names={note.mentioned_names} />;
 
   /*
    * 長相**跟一般提問一樣**:右側、有底的泡泡、別人的掛頭像、
@@ -3188,21 +3363,31 @@ const NoteBubble = memo(function NoteBubble({
         // 時間跟提問一樣滑過才出現;多一個 @ 記號講「這是便條」——
         // 平常不佔畫面,想確認的時候滑過去就有
         metadata={
-          <Stack data-hover-reveal="" xstyle={styles.metaFlushEnd}>
-            <ChatMessageMetadata
-              timestamp={
-                <Timestamp value={parseServerTime(note.created_at).toISOString()} format="time" />
-              }
-              footer={
-                <HStack gap={1} vAlign="center">
-                  <Icon icon={AtSign} size="sm" />
-                  <Text type="supporting" color="secondary">
-                    Note
-                  </Text>
-                </HStack>
-              }
-            />
-          </Stack>
+          /*
+           * 已讀(看過的人的小頭像,`NoteReceipt`)**常駐**,接在同一列、貼著泡泡外緣:
+           * 自己的排最後(靠右)、別人的排最前(靠左),滑過才出現的那段在內側。
+           * ⚠️ 不要另起一列:藏起來的時間列照樣佔高度,泡泡跟頭像中間會空一大塊。
+           * `seenInOrder` 收得了 undefined:交接空窗裡的舊後端沒有 `seen`(同上面 `mentioned_names`)。
+           */
+          <HStack gap={1} vAlign="center" hAlign={mine ? 'end' : 'start'} xstyle={styles.metaFlushEnd}>
+            {mine ? null : receipt}
+            <Stack data-hover-reveal="">
+              <ChatMessageMetadata
+                timestamp={
+                  <Timestamp value={parseServerTime(note.created_at).toISOString()} format="time" />
+                }
+                footer={
+                  <HStack gap={1} vAlign="center">
+                    <Icon icon={AtSign} size="sm" />
+                    <Text type="supporting" color="secondary">
+                      Note
+                    </Text>
+                  </HStack>
+                }
+              />
+            </Stack>
+            {mine ? receipt : null}
+          </HStack>
         }
       >
         {/* @ 膠囊滑過去看得到名字與職稱 —— 見 MentionedText 的說明 */}

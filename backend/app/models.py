@@ -195,11 +195,31 @@ class User(Base):
     # ⚠️ **它就是權限**(users._FULL_ROLES):上面那個 tools 是由 role 推導出來的
     # 快取欄位,不要再從別的地方寫它。
     role = Column(String, nullable=True)
+    # 個人加減:**只存跟角色不同的那幾項**,JSON,例 {"ai_exec": false, "usage": true}。
+    # NULL = 跟角色一模一樣。讀寫一律走 roles.py。
+    perm_overrides = Column(Text, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
     created_by = Column(String, nullable=True)  # 誰建的(管理員名)
     # 上次改密碼時間(內稽內控)。從沒改過(還是預設密碼)留 NULL。
     password_changed_at = Column(DateTime, nullable=True)
+
+
+class Role(Base):
+    """角色:帳號管理頁「角色」分頁那張表。
+
+    `id` 是不變的鍵,`users.role` 存的就是它;`name` 是畫面上的字,可以改。
+    兩個種子角色的 id 沿用舊職稱字串(`Consultant`、`Software engineer`),既有帳號一個字都不用改。
+    `perms` 是 JSON,缺的鍵一律當「沒有」—— 讀寫一律走 roles.py。
+    """
+
+    __tablename__ = "roles"
+
+    id = Column(String, primary_key=True)
+    name = Column(String, nullable=False)
+    perms = Column(Text, nullable=False, default="{}")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    created_by = Column(String, nullable=True)
 
 
 class AuditLog(Base):
@@ -302,6 +322,13 @@ class UserPref(Base):
     # 選 classic 時也留著 —— 切回 Bloub 還是原本那個樣子。
     companion_shape = Column(String, nullable=True)
     companion_color = Column(String, nullable=True)
+    # 要不要畫吉祥物。NULL = 沒設過 = **畫**(opt-out):
+    # 上線後沒有人會突然發現吉祥物不見了。關掉時它講的那幾句(@ 提及、分享、額度)改走 toast。
+    companion_visible = Column(Boolean, nullable=True)
+    # 改過的快捷鍵(Settings → Keyboard shortcuts)。JSON 文字,**只存改過的**:
+    # `{"new_chat": {"mod": true, "shift": true, "key": "o"}, "sidebar": false}`,false = 停用。
+    # NULL = 全部照預設。合法的 id 與格式在 `users.clean_shortcuts`。
+    shortcuts = Column(Text, nullable=True)
 
 
 class ConversationShare(Base):

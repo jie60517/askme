@@ -1,23 +1,24 @@
 // @vitest-environment jsdom
 /**
- * 登入頁靠「型別上被拿掉、執行期照樣攤到 `<input>`」這件事給手機鍵盤提示
- * (`pages/Login.tsx` 的 `NativeInputHints`)。
+ * 登入頁、SSH 終端機檔案欄路徑欄的手機鍵盤提示(`lib/nativeInputHints.ts`)
+ * 真的落在 `<input>` 上。
  *
- * 那是設計系統的**實作細節**(`TextInput.js` 把 `...rest` 攤到 `<input>`),
- * 不是公開的介面 —— 升版改掉的話 `tsc` 一聲不吭,手機上驗證碼又跳回全鍵盤、
- * 帳號第一個字又被自動大寫。這一檔就是那條線上唯一的警報。
+ * Astryx 0.7 起這幾個是 TextInput 的正式屬性(0.4 時代只能靠展開塞進去);
+ * 升版若又改名或改成不往 `<input>` 給,`tsc` 不一定會叫 —— 手機上驗證碼會跳回全鍵盤、
+ * 帳號第一個字被自動大寫。這一檔就是那條線上的警報。
  *
- * ⚠️ 不 import `pages/Login.tsx`(它拖著 three.js 場景與整頁的 StyleX);
- * 這裡只驗那條前提:展開進去的屬性真的落在 `<input>` 上。
+ * ⚠️ 不 import `pages/Login.tsx`(它拖著 three.js 場景與整頁的 StyleX)。
  */
 import {afterEach, describe, expect, it} from 'vitest';
 import {cleanup, render} from '@testing-library/react';
 
 import {TextInput} from '@astryxdesign/core/TextInput';
 
+import {NO_AUTOFIX} from '../../lib/nativeInputHints';
+
 afterEach(cleanup);
 
-describe('TextInput 把型別外的原生屬性攤到 <input>', () => {
+describe('TextInput 的手機鍵盤提示落在 <input> 上', () => {
   it('驗證碼:inputmode / autocomplete / enterkeyhint', () => {
     const hints = {inputMode: 'numeric', autoComplete: 'one-time-code', enterKeyHint: 'go'} as const;
     const {container} = render(
@@ -33,13 +34,8 @@ describe('TextInput 把型別外的原生屬性攤到 <input>', () => {
   });
 
   it('帳號:autocapitalize / autocorrect / spellcheck 關掉', () => {
-    const hints = {
-      autoCapitalize: 'none',
-      autoCorrect: 'off',
-      spellCheck: false,
-    } as const;
     const {container} = render(
-      <TextInput label="Username" value="" onChange={() => {}} {...hints} />,
+      <TextInput label="Username" value="" onChange={() => {}} {...NO_AUTOFIX} />,
     );
     const input = container.querySelector('input')!;
     expect(input.getAttribute('autocapitalize')).toBe('none');
