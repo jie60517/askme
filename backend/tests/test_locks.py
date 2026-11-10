@@ -72,8 +72,10 @@ def _admin():
 def _lock_the_ip():
     """撞到 IP 層上限。`LOGIN_IP_MAX_ATTEMPTS=3`,所以三次就鎖。
 
-    用 `record_blocked_attempt`:它只記 IP 層,不會順手把哪個帳號也鎖上。"""
-    for _ in range(3):
+    先用一個用不到的帳號真的打錯一次(被擋下的嘗試只算「自己打錯過」的來源),
+    其餘用 `record_blocked_attempt`:它只記 IP 層,不會順手把哪個帳號也鎖上。"""
+    ratelimit.record_failure("lock-test-typo", IP)
+    for _ in range(2):
         ratelimit.record_blocked_attempt(IP)
 
 
@@ -151,7 +153,7 @@ def test_only_locked_entries_are_listed():
 
     列出來的話,真正需要處理的那幾筆會被淹沒。
     """
-    ratelimit.record_blocked_attempt(IP)  # 只有 1 次,上限是 3
+    ratelimit.record_failure("lock-test-typo", IP)  # 只有 1 次,上限是 3
 
     with TestClient(app) as client:
         data = client.get("/api/locks", headers=_admin()).json()
@@ -198,7 +200,7 @@ def test_unlock_also_clears_the_failure_count():
     with TestClient(app) as client:
         assert client.post("/api/locks/unlock", json={"ip": IP}, headers=_admin()).status_code == 204
 
-    ratelimit.record_blocked_attempt(IP)  # 上限 3,計數若沒清這一次就會再鎖上
+    ratelimit.record_failure("lock-test-typo", IP)  # 上限 3,計數若沒清這一次就會再鎖上
     assert _ip_wait() == 0, "計數沒清掉 —— 一次失敗就又被鎖住了"
 
 

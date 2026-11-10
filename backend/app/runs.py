@@ -160,6 +160,21 @@ def active() -> List[Run]:
     return sorted((r for r in _runs.values() if not r.done), key=lambda r: r.started_at, reverse=True)
 
 
+def archive_owner(name: str, archived: str) -> None:
+    """帳號刪掉了:它名下還在記憶體裡的問答改掛封存名(`users.delete_user` 回的那個),還在跑的停掉。
+
+    run 的可見性是 `run.owner == viewer` 的字串比對,而名字刪了可以重建 —— 不改掉的話,
+    同名的新帳號登入就能列出、重播、停掉前一個人還在跑(或剛跑完 10 分鐘內)的題目。
+    還在跑的停掉:人已經不在了,題目不該帶著他當初的工具權限繼續跑、繼續計費。
+    跟 `workflow_engine.archive_runner` 同一個做法。
+    """
+    for run in _runs.values():
+        if run.owner == name:
+            run.owner = archived
+            if not run.done:
+                run.request_stop()
+
+
 def active_for_conversation(conversation_id: str) -> Optional[Run]:
     for run in _runs.values():
         if not run.done and run.conversation_id == conversation_id:

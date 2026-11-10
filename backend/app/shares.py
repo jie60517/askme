@@ -48,6 +48,21 @@ def owner_of(db: Session, conversation_id: str) -> Optional[str]:
     return row[0] if row else None
 
 
+def has_live_records(db: Session, conversation_id: str) -> bool:
+    """這組對話有沒有還沒刪的紀錄(不管 owner 是誰)。
+
+    `owner_of` 回 None 分不出「不存在」與「最早那筆 owner 是 NULL(強制登入前的公開池)」,
+    要分的呼叫端問這一支。
+    """
+    return (
+        db.query(models.QARecord.id)
+        .filter(models.QARecord.conversation_id == conversation_id)
+        .filter(models.QARecord.deleted_at.is_(None))
+        .first()
+        is not None
+    )
+
+
 def can_access(db: Session, conversation_id: str, viewer: Optional[str]) -> bool:
     """這個人看不看得到這組對話 —— 自己的,或別人分享給他的。
 

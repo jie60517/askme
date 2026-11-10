@@ -369,9 +369,7 @@ def _register(
     if math.isinf(locked_until):
         return None  # 已經永久封鎖了,不用再記(也不用再寫一次資料庫)
 
-    # 計數的有效期。永久模式沒有「鎖定時長」可以拿來當視窗,用固定 15 分鐘 ——
-    # 少了這個,計數永遠不歸零,一個偶爾打錯字的人累積幾個月也會被永久封鎖。
-    window = 900.0 if permanent else lockout
+    window = _count_window(lockout)
 
     # 上一輪的計數已經過期(距離第一次失敗超過一個視窗,而且沒在鎖定中),
     # 從頭算起 —— 不然一個打錯過幾次密碼的人,幾天後再打錯一次就被鎖,
@@ -438,7 +436,22 @@ def record_second_factor_failure(username: str) -> None:
             _sweep(_accounts, now, config.LOGIN_LOCKOUT_SEC)
 
 
-def _note_ip_failure(ip: str) -> None:
+def _count_window(lockout: float) -> float:
+    """失敗計數的有效期。永久模式沒有「鎖定時長」可以拿來當視窗,用固定 15 分鐘 ——
+    少了這個,計數永遠不歸零,一個偶爾打錯字的人累積幾個月也會被永久封鎖。"""
+    return 900.0 if lockout <= 0 else float(lockout)
+
+
+def _has_own_failures(ip: str, now: float) -> bool:
+    """這個 IP 在目前的計數視窗裡有沒有自己的失敗,或已經被鎖。呼叫端要持有 `_lock`。"""
+    entry = _ips.get(ip)
+    if entry is None:
+        return False
+    count, started_at, locked_until = entry
+    return locked_until > now or (count > 0 and started_at + _count_window(config.LOGIN_IP_LOCKOUT_SEC) > now)
+
+
+def _note_ip_failure(ip: str, *, only_if_failed_before: bool = False) -> None:
     """記一次 IP 層的失敗,滿了就鎖上並落地。**IP 層的兩個入口都只走這一支。**
 
     抽出來是因為兩個入口(登入失敗、被擋下的嘗試)要做的完全是同一件事;
@@ -447,11 +460,16 @@ def _note_ip_failure(ip: str) -> None:
 
     三段的順序不能換:白名單先擋掉(連計數都不記)→ 在 `_lock` 裡記一次 →
     **放開鎖之後**才寫資料庫(見 `_persist_block` 與 `_db_lock`)。
+
+    `only_if_failed_before`:這個 IP 自己沒打錯過(見 `_has_own_failures`)就不記。
+    判斷跟記錄在同一把鎖裡,中間不會被別的請求插進來。
     """
     if is_allowlisted(ip):
         return
     now = time.time()
     with _lock:
+        if only_if_failed_before and not _has_own_failures(ip, now):
+            return
         locked_until = _register(
             _ips, ip, now, config.LOGIN_IP_MAX_ATTEMPTS, config.LOGIN_IP_LOCKOUT_SEC
         )
@@ -484,8 +502,14 @@ def record_blocked_attempt(ip: str) -> None:
 
     只加 IP,**不碰帳號的計數**:帳號那層加下去等於讓攻擊者可以無限延長
     某個使用者的鎖定時間,那正是我們刻意要避免的事(見 config.py 的說明)。
+
+    **只算「自己打錯過」的來源。** 這個 IP 在目前的計數視窗裡有過自己的失敗、
+    或已經被鎖,才把這次被擋算進去;從沒打錯過的來源(例如帳號被別人從
+    別處撞鎖、本人一直重試)不算 —— 不然外面的人只要先把某個使用者的帳號撞鎖,
+    他自己重試十次就把他所在的整個 IP **永久**封鎖,連管理員都進不來。
+    猛撞同一個帳號的攻擊者自己一定先有失敗,上面那個大洞照樣補得住。
     """
-    _note_ip_failure(ip)
+    _note_ip_failure(ip, only_if_failed_before=True)
 
 
 def record_success(username: str, ip: str) -> None:

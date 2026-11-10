@@ -134,11 +134,23 @@ def test_expiring_lock_stores_a_deadline_and_expires_across_restart(monkeypatch)
 
 
 def test_blocked_attempts_also_persist():
-    """已經被擋下來的嘗試也算 IP 層(見 record_blocked_attempt),鎖上一樣要落地。"""
-    for _ in range(3):
+    """已經被擋下來的嘗試也算 IP 層(見 record_blocked_attempt),鎖上一樣要落地。
+
+    前提是這個來源自己打錯過(先記一次失敗)—— 從沒打錯過的來源不算,見下一條。
+    """
+    _fail(IP, 1)
+    for _ in range(2):
         ratelimit.record_blocked_attempt(IP)
     assert ratelimit.check("someone", IP) == ratelimit.PERMANENT
     assert _restart() == 1
+
+
+def test_blocked_attempts_from_clean_source_do_not_count():
+    """從沒打錯過的來源,被擋再多次也不能被永久封鎖(2026-11-06 稽核)。"""
+    for _ in range(10):
+        ratelimit.record_blocked_attempt(IP)
+    assert ratelimit.check("someone", IP) == 0
+    assert _rows() == []
 
 
 # --------------------------------------------------------------- 放得了

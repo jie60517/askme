@@ -2,14 +2,14 @@ import asyncio
 import json
 import logging
 import uuid
-from typing import List, Optional
+from typing import Callable, List, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from .. import (
-    agent, auth, config, docgen, ids, models, pdfgen, runs, shares, sheetgen, slidegen, zipgen,
+    agent, auth, config, docgen, ids, models, pdfgen, runs, shares, sheetgen, slidegen, terminal, zipgen,
 )
 from ..database import SessionLocal, get_db
 from ..uploads import save_uploads_async
@@ -50,14 +50,86 @@ def _mark_crashed(run: runs.Run) -> None:
     run.emit({"type": "error", "message": "收尾時發生錯誤,這題的紀錄可能不完整。"})
 
 
-async def _watch(run: runs.Run):
+async def _watch(
+    run: runs.Run,
+    still_allowed: Optional[Callable[[], bool]] = None,
+    every: float = terminal.TOKEN_CHECK_SEC,
+):
     """把一個執行中的問答轉成 ndjson 串流。
 
     這裡「只是在看」——  斷線不會影響 run 本身,它跑在自己的背景 task 上。
     follow() 會先把已經發生的事件重播一遍,所以中途才接上的人也看得到前面的內容。
+
+    `still_allowed`(見 `_still_visible`):每 `every` 秒在 thread 裡重問一次「這個人還看得到嗎」,
+    看不到了就送一個 error 事件收線 —— 共用被收回、登出、token 被撤銷之後,已經開著的串流
+    不能繼續把剩下的回答送給他。跟筆記的 live WebSocket 同一個週期。
     """
-    async for event in run.follow():
-        yield _ndjson(event)
+    if still_allowed is None:
+        async for event in run.follow():
+            yield _ndjson(event)
+        return
+
+    agen = run.follow()
+    nxt = asyncio.ensure_future(agen.__anext__())
+    loop = asyncio.get_running_loop()
+    last_check = loop.time()
+    try:
+        while True:
+            done, _ = await asyncio.wait({nxt}, timeout=every)
+            if loop.time() - last_check >= every:
+                last_check = loop.time()
+                if not await asyncio.to_thread(still_allowed):
+                    yield _ndjson({"type": "error", "message": "你已經看不到這組對話了"})
+                    return
+            if not done:
+                continue
+            try:
+                event = nxt.result()
+            except StopAsyncIteration:
+                return
+            yield _ndjson(event)
+            nxt = asyncio.ensure_future(agen.__anext__())
+    finally:
+        nxt.cancel()
+        try:
+            await agen.aclose()
+        except Exception:  # noqa: BLE001 —— 正在等的 __anext__ 被取消時 aclose 可能拋;只是在看,收掉就好
+            pass
+
+
+def _still_visible(run_id: str, viewer: str, authorization: str) -> Callable[[], bool]:
+    """「這個人現在還看得到這一題嗎」:token 還是他的,而且 `_visible_run` 照樣放行(用新的 DB session)。"""
+    token = auth.bearer_token(authorization)
+
+    def check() -> bool:
+        if auth.username_for(token) != viewer:
+            return False
+        fresh = SessionLocal()
+        try:
+            _visible_run(run_id, viewer, fresh)
+            return True
+        except HTTPException:
+            return False
+        finally:
+            fresh.close()
+
+    return check
+
+
+def stream_run(
+    run: runs.Run,
+    headers: Optional[dict] = None,
+    *,
+    viewer: Optional[str] = None,
+    authorization: str = "",
+) -> StreamingResponse:
+    """把一題的事件流交給瀏覽器(ndjson)。
+
+    送出的人不是這組對話的擁有者(共用者續問:run.owner 是原擁有者)時,看的過程中要定期重新確認
+    他還看得到 —— 共用在回答途中被收回,剩下的內容就不該再送給他。擁有者自己的題目不用。
+    """
+    still = _still_visible(run.run_id, viewer, authorization) if viewer and viewer != run.owner else None
+    return StreamingResponse(_watch(run, still), media_type="application/x-ndjson", headers=headers)
 
 
 def _finalize(run: runs.Run, result: dict) -> None:
@@ -383,6 +455,7 @@ async def ask(
     kb: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     owner: str = Depends(auth.require_user),
+    authorization: str = Header(default=""),
 ):
     # conversation_id 是前端產生的,但 API 是公開的,不能假設格式一定正確。
     # 它會進資料庫查詢、也會變成側邊欄連結,擋掉奇怪的字元最省事。
@@ -410,6 +483,13 @@ async def ask(
     # 紀錄仍然掛在**原 owner** 名下(見下面的 record_owner),不是掛在他自己名下。
     record_owner = owner
     if conversation_id:
+        # `owner_of` 回 None 有兩種意思:這組對話不存在,或最早那筆的 owner 是 NULL ——
+        # 強制登入之前的「公開池」舊紀錄(database.py 刻意留著)。後者不能當成新對話:
+        # 不然任何登入的人拿著舊網址就能接著問、`--resume` 回當年那個 session、
+        # 把當年的附件目錄放進讀取範圍。
+        # 公開池對一般帳號一律不可見(conversations.visible_to、files.py),續問也一樣。
+        if existing_owner is None and shares.has_live_records(db, conversation_id):
+            raise HTTPException(status_code=404, detail="找不到這個對話")
         if existing_owner is not None and existing_owner != owner:
             if not shares.can_access(db, conversation_id, owner):
                 raise HTTPException(status_code=404, detail="找不到這個對話")
@@ -553,6 +633,9 @@ async def ask(
             for (sid,) in db.query(models.QARecord.session_id)
             .filter(models.QARecord.conversation_id == conv_id)
             .filter(models.QARecord.deleted_at.is_(None))
+            # 同一組對話的 owner 從頭到尾一致(見上面 record_owner);再釘一次,
+            # 別人(或公開池)名下的附件目錄不會因為 conversation_id 相同就被放進讀取範圍
+            .filter(models.QARecord.owner == record_owner)
             .filter(models.QARecord.session_id != session_id)
             .order_by(models.QARecord.created_at.desc())
             .limit(config.PRIOR_SESSION_DIRS_LIMIT)
@@ -658,7 +741,7 @@ async def ask(
         )
     )
 
-    return StreamingResponse(_watch(run), media_type="application/x-ndjson")
+    return stream_run(run, viewer=owner, authorization=authorization)
 
 
 @router.get("/ask/runs")
@@ -700,6 +783,11 @@ def _visible_run(run_id: str, viewer: Optional[str], db: Session) -> runs.Run:
     record = db.get(models.QARecord, run.record_id)
     if record is None or record.deleted_at is not None:
         raise gone
+    # 這一題現在的擁有者還得是 run 記的那個名字。刪帳號會把紀錄改成封存名(users.delete_user),
+    # 而 run.owner 是記憶體裡的舊名字 —— 同名重建的新帳號不能靠名字相同拿到前一個人的題目。
+    # (刪帳號時 runs.archive_owner 也會改掉 run.owner;這裡是第二道,不靠那一步有沒有跑到。)
+    if record.owner != run.owner:
+        raise gone
     if run.owner != viewer and not (
         shares.owner_of(db, run.conversation_id) == run.owner
         and shares.can_access(db, run.conversation_id, viewer)
@@ -713,14 +801,19 @@ async def watch_run(
     run_id: str,
     db: Session = Depends(get_db),
     viewer: str = Depends(auth.require_user),
+    authorization: str = Header(default=""),
 ):
     """重新接上一個還在跑(或剛跑完)的問答,從第一個事件開始重播。
 
     共用者接的是同一條串流,所以會先重播已經發生的事件(讀了哪些檔、跑了哪些工具)
     再繼續跟,中途才加入也看得到完整過程。
+
+    **看的過程中會定期重新確認身分與權限**(見 _watch):共用被收回或登出之後,串流會收線。
     """
+    run = _visible_run(run_id, viewer, db)
+    # 擁有者自己重新接上也要查:登出、被停用之後,開著的這條一樣要收
     return StreamingResponse(
-        _watch(_visible_run(run_id, viewer, db)), media_type="application/x-ndjson"
+        _watch(run, _still_visible(run_id, viewer, authorization)), media_type="application/x-ndjson"
     )
 
 

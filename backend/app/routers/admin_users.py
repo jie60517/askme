@@ -12,7 +12,7 @@ import logging
 import anyio
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 
-from .. import audit, auth, config, mfa, ratelimit, roles, schemas, terminal, users, workflow_engine
+from .. import audit, auth, config, mfa, ratelimit, roles, runs, schemas, terminal, users, workflow_engine
 
 router = APIRouter(prefix="/api", tags=["admin-users"])
 logger = logging.getLogger(__name__)
@@ -289,6 +289,7 @@ def delete_user(username: str, request: Request, admin: str = Depends(require_us
     name = archived.rsplit("#deleted-", 1)[0]
     anyio.from_thread.run(terminal.close_user, name)
     workflow_engine.archive_runner(name, archived)
+    runs.archive_owner(name, archived)
     ratelimit.reset(username=name.lower())
     # MFA 綁定跟著帳號一起消失。留著的話,同名帳號被重建之後會**繼承前一個人的
     # 綁定** —— 新的使用者拿到帳號卻進不去,而畫面上完全看不出原因。
@@ -329,6 +330,21 @@ def update_role(role_id: str, req: schemas.UpdateRoleRequest, request: Request, 
     perms = roles.clean_perms(req.perms.model_dump()) if req.perms is not None else None
     # 改之前、改之後都要被自己的權限包住(`_guard` ②③):不然可以把自己那個角色的權限加大
     _guard(admin, request, None, role["perms"], *([perms] if perms is not None else []))
+    if perms is not None and not auth.is_admin(admin):
+        # D9a ③ 也要透過角色成立:改角色等於同時改掛著它的每一個人。只看角色本身的話,
+        # 權限小的人可以把一個「自己也有的」角色清空,拔掉某個靠個人加權而比他大的人身上
+        # 來自角色的那幾項 —— 直接改那個人會被 _target 擋下。
+        # 所以每個實際權限會變的成員,改之前、改之後都要被操作者包住,跟直接改帳號同一把尺;
+        # 權限不變的成員不受這次修改影響,不用查。
+        # 目標傳 None:操作者自己也掛在這個角色上時,照舊交給上面那道(不能把它加大)判斷 ——
+        # 透過角色只拿得掉自己的權限,加不上去。
+        for member in roles.members_of(role_id):
+            cur = roles.access_of(member)
+            if cur is None:
+                continue
+            after_member = roles.apply(perms, cur["own"])
+            if after_member != cur["perms"]:
+                _guard(admin, request, None, cur["perms"], after_member)
     before = _write("角色", roles.update_role, role_id, name=req.name, perms=perms)
     after = roles.get_role(role_id)
     ip = ratelimit.client_ip(request)

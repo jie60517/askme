@@ -295,6 +295,15 @@ def _members_by_role(db) -> dict[str, list[str]]:
     return out
 
 
+def members_of(role_id: str) -> list[str]:
+    """掛著這個角色的帳號(含停用的;空的、對不上的 `users.role` 算預設角色)。"""
+    db = SessionLocal()
+    try:
+        return _members_by_role(db).get(role_id, [])
+    finally:
+        db.close()
+
+
 def _member_counts(db) -> dict[str, int]:
     return {rid: len(names) for rid, names in _members_by_role(db).items()}
 
